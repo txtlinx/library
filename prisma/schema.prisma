@@ -1,0 +1,70 @@
+datasource db {
+  provider = "postgresql"
+}
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+model ErrorEntry {
+  id        Int         @id @default(autoincrement())
+  title     String
+  message   String
+  stack     String?
+  solution  String
+  tags      String
+  createdAt DateTime    @default(now())
+  images    ErrorImage[]
+}
+
+model ErrorImage {
+  id        Int       @id @default(autoincrement())
+  filename  String
+  createdAt DateTime  @default(now())
+  error     ErrorEntry @relation(fields: [errorId], references: [id])
+  errorId   Int
+}
+
+enum TaskStatus {
+  IN_PROGRESS
+  PAUSED
+  COMPLETED
+}
+
+model TaskEntry {
+  id              Int       @id @default(autoincrement())
+  title           String
+  description     String?
+  startAt         DateTime
+  durationMinutes Int
+  tags            String
+  createdAt       DateTime  @default(now())
+  status          TaskStatus @default(IN_PROGRESS)
+}
+
+enum Bank {
+  FALABELLA
+  ESTADO
+  CHILE
+  SANTANDER
+}
+
+enum PaymentStatus {
+  PAID
+  PAYING
+  PAUSED
+}
+
+model Payment {
+  id            Int           @id @default(autoincrement())
+  title         String
+  amount        Float
+  type          String        // INCOME | FIXED_EXPENSE | EXTRA_EXPENSE
+  bank          Bank
+  status        PaymentStatus @default(PAYING)
+  installments  Int?          // 1-58 si aplica
+  paidInstallments Int?       // 0-58, no mayor que installments
+  month         String?       // YYYY-MM: mes al que pertenece el pago
+  createdAt     DateTime      @default(now())
+  updatedAt     DateTime      @updatedAt
+}

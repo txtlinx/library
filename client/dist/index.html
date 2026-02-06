@@ -1,0 +1,323 @@
+<!doctype html>
+<html lang="es">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1" />
+    <title>Error Library - Front</title>
+    <link rel="stylesheet" href="/style.css">
+    <link rel="preconnect" href="https://cdn.jsdelivr.net"/>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js" defer></script>
+    <script src="https://cdn.jsdelivr.net/npm/sortablejs@1.15.2/Sortable.min.js"></script>
+    <style>
+      .topbar { position: sticky; top: 0; z-index: 1000; background: #111827; color: #fff; padding: 8px 16px; box-shadow: 0 2px 8px rgba(0,0,0,0.15); }
+      .tabs { display: flex; gap: 12px; }
+      .tab-btn { background: transparent; color: #fff; border: none; padding: 8px 12px; border-radius: 6px; cursor: pointer; }
+      .tab-btn.active { background: #374151; }
+      .hidden { display: none; }
+      .topbar-marquee { overflow: hidden; white-space: nowrap; }
+      .marquee-track { display: inline-block; will-change: transform; animation: marquee 48s linear infinite; }
+      .topbar-marquee:hover .marquee-track { animation-play-state: paused; }
+      @keyframes marquee {
+        0% { transform: translateX(100%); }
+        100% { transform: translateX(-100%); }
+      }
+      .marquee-label { margin-right: 12px; color: #cbd5e1; }
+      .input-with-icon { display: flex; align-items: center; gap: 8px; }
+      .input-icon { flex-shrink: 0; }
+      .payments-summary-box { width:100%; background:#0a0f1e; border:1px solid #1f2937; border-radius:12px; padding:12px; box-shadow:0 10px 30px rgba(0,0,0,0.4); margin-top:12px; }
+      .payments-summary { display:flex; gap:12px; align-items:flex-start; width:100%; justify-content:space-between; flex-wrap: wrap; width: 100%; box-sizing: border-box; }
+      .canvas-wrap { position:relative; flex:1 1 560px; background:#0b1220; border:1px solid #1f2937; border-radius:12px; padding:16px 8px 8px; box-shadow:0 8px 24px rgba(0,0,0,0.35); min-width:320px; width: 100%; }
+      .canvas-title { position:absolute; top:4px; left:12px; color:#cbd5e1; font-size:13px; z-index:1; }
+      .legend { display:flex; flex-direction:column; gap:8px; min-width:260px; flex:1 1 260px; }
+      .legend-item { display:flex; align-items:center; gap:8px; padding:8px 10px; border:1px solid #1f2937; border-radius:10px; background:#0b1220; box-shadow:0 4px 14px rgba(0,0,0,0.25); justify-content:space-between; }
+      .legend-dot { width:12px; height:12px; border-radius:50%; display:inline-block; }
+      .legend-label { color:#94a3b8; font-size:12px; }
+      .legend-value { color:#e5e7eb; font-weight:700; margin-left:auto; text-align:right; min-width:120px; }
+      /* Subtabs: look like real tabs aligned side by side */
+      .subtabs { display:flex; gap:8px; border-bottom:1px solid #1f2937; margin-bottom:12px; }
+      .subtab-btn { appearance:none; background:transparent; color:#e5e7eb; border:none; padding:8px 12px; cursor:pointer; border-bottom:2px solid transparent; border-radius:6px 6px 0 0; font-weight:600; }
+      .subtab-btn:hover { color:#fff; }
+      .subtab-btn.active { color:#fff; border-bottom-color:#3b82f6; }
+
+      /* Inputs alineados y consistentes en el modal de formulario */
+      .form-modal label { display:block; font-size:0.95rem; color:#e5e7eb; margin-top:8px; }
+      .form-modal input[type="text"],
+      .form-modal input[type="file"],
+      .form-modal textarea { width:100%; box-sizing:border-box; margin-top:6px; margin-bottom:10px; padding:8px 10px; border:1px solid #1f2937; border-radius:8px; background:#0b1220; color:#e5e7eb; }
+      .form-modal textarea { resize:vertical; }
+
+      /* Modo P: difumina contenido sensible dentro de la sección con clase .censored */
+      #errors-section.censored .censor-title,
+      #errors-section.censored .censor-message,
+      #errors-section.censored .censor-solution,
+      #errors-section.censored .censor-tags { filter: blur(6px); }
+
+      /* Extensión Modo P a tareas y pagos */
+      #tasks-section.censored .censor-title,
+      #tasks-section.censored .censor-message,
+      #tasks-section.censored .censor-tags { filter: blur(6px); }
+      #payments-section.censored .censor-title,
+      #payments-section.censored .censor-message,
+      #payments-section.censored .censor-tags { filter: blur(6px); }
+
+      /* Colapsar listas */
+      .collapsible.collapsed { display:none; }
+
+      .container { width: 100%; max-width: 100%; box-sizing: border-box; padding: 16px; overflow-x: hidden; }
+      /* Asegurar que los grids internos respeten el ancho */
+      #week-view-container, #week-view { width: 100%; max-width: 100%; box-sizing: border-box; }
+    </style>
+  </head>
+  <body>
+    <div class="topbar">
+      <div class="tabs">
+        <button class="tab-btn active" data-tab="errors">Errores</button>
+        <button class="tab-btn" data-tab="tasks">Tareas</button>
+        <button class="tab-btn" data-tab="payments">My Money</button>
+      </div>
+      <div class="topbar-marquee"><span class="marquee-track"><span class="marquee-label">Próxima tarea:</span><span id="next-task-text">cargando...</span></span></div>
+    </div>
+    <div class="container">
+      <h1>Bibliotecas</h1>
+
+      <!-- Información: IP y relojes -->
+      <div id="client-info">
+        <div><strong>Tu IP:</strong> <span id="ip">cargando...</span></div>
+        <div><strong>Hora local:</strong> <span id="time-local">--:--:--</span></div>
+        <div><strong>Hora Santiago de Chile:</strong> <span id="time-santiago">--:--:--</span></div>
+      </div>
+
+      <section id="errors-section" data-section="errors">
+        <section id="create">
+          <h2>Crear error</h2>
+          <button id="error-create-toggle" type="button" style="background:#3b82f6; color:#fff; padding:8px 12px; border-radius:6px; border:none; cursor:pointer; margin-bottom:8px;">Crear error</button>
+          <form id="create-form" enctype="multipart/form-data" style="display:none;">
+            <label>Título<br/><input name="title" required /></label><br/>
+            <label>Mensaje<br/><textarea name="message" required></textarea></label><br/>
+            <label>Stack (opcional)<br/><textarea name="stack"></textarea></label><br/>
+            <label>Solución<br/><input name="solution" required /></label><br/>
+            <label>Tags (separados por coma)<br/><input name="tags" required /></label><br/>
+            <label>Imágenes (opcional)<br/><input id="images" name="images" type="file" accept="image/*" multiple /></label><br/>
+            <button type="submit">Crear</button>
+          </form>
+        </section>
+
+        <h2 style="display:flex; align-items:center; gap:8px;">
+          Lista de errores
+          <button id="toggle-errors" type="button" style="background:#374151; color:#fff; padding:6px 10px; border-radius:6px; border:none; cursor:pointer;">Contraer</button>
+          <button id="errors-censor-toggle" type="button" style="background:#6b7280; color:#fff; padding:6px 10px; border-radius:6px; border:none; cursor:pointer;">Modo P: OFF</button>
+        </h2>
+
+        <!-- Campo de búsqueda por tag -->
+        <div style="margin-bottom:12px;">
+          <input
+            type="text"
+            id="search"
+            placeholder="Buscar por cualquier campo"
+            style="width:100%; padding:8px; border:1px solid #334155; border-radius:4px; background:#0b1220; color:#e5e7eb;"
+          />
+        </div>
+
+        <div class="filters-row" style="margin-bottom:12px;">
+          <label>Orden
+            <select id="errors-sort">
+              <option value="desc">Recientes primero</option>
+              <option value="asc">Antiguos primero</option>
+            </select>
+          </label>
+          <label>Tags
+            <input type="text" id="errors-tag-filter" placeholder="ej: nestjs, prisma" />
+          </label>
+          <button id="errors-refresh" type="button" title="Ver todos" style="background:#374151; padding:6px 8px;">↻</button>
+        </div>
+        <ul id="errors" class="collapsible expanded"></ul>
+      </section>
+      <section id="tasks-section" data-section="tasks" class="hidden">
+        <div class="subtabs">
+          <button id="tasks-subtab-list" class="subtab-btn active" type="button" data-subtab="list">Lista</button>
+          <button id="tasks-subtab-week" class="subtab-btn" type="button" data-subtab="week">Semana</button>
+        </div>
+        <h2>Crear tarea</h2>
+        <button id="task-create-toggle" type="button" style="background:#3b82f6; color:#fff; padding:8px 12px; border-radius:6px; border:none; cursor:pointer; margin-bottom:8px;">Crear tarea</button>
+        <form id="task-create-form" style="display:none;">
+          <label>Título<br/><input name="title" required /></label><br/>
+          <label>Descripción (opcional)<br/><textarea name="description"></textarea></label><br/>
+          <label>Inicio (ISO)<br/>
+            <div class="input-with-icon" style="position:relative;">
+              <input name="startAt" id="task-startAt" type="datetime-local" required />
+              <button id="task-startAt-btn" type="button" title="Abrir calendario" style="position:absolute; right:8px; top:50%; transform:translateY(-50%); background:#374151; color:#fff; padding:4px 6px; border-radius:4px;">📅</button>
+            </div>
+          </label><br/>
+          <label>Duración (minutos)<br/><input name="durationMinutes" type="number" min="1" required /></label><br/>
+          <label>Tags (separados por coma)<br/><input name="tags" required /></label><br/>
+          <label>Estado<br/>
+            <select name="status">
+              <option value="">(por defecto: En proceso)</option>
+              <option value="IN_PROGRESS">En proceso</option>
+              <option value="PAUSED">Detenida</option>
+              <option value="COMPLETED">Terminada</option>
+            </select>
+          </label><br/>
+          <button type="submit">Crear tarea</button>
+        </form>
+
+        <h2 style="margin-top: 16px;">Lista de tareas <button id="toggle-tasks" class="toggle-list-btn" type="button">Contraer</button> <button id="tasks-censor-toggle" type="button" title="Ocultar contenido" style="background:#6b7280; margin-left:8px;">Modo P: OFF</button> <button id="tasks-calendar-btn" type="button" title="Calendario" style="background:#374151; margin-left:8px; display:inline-flex; align-items:center; gap:6px;">📅 Calendario</button></h2>
+        <div style="margin-bottom:12px;">
+          <input
+            type="text"
+            id="task-search"
+            placeholder="Buscar tareas por cualquier campo"
+            style="width:100%; padding:8px; border:1px solid #334155; border-radius:4px; background:#0b1220; color:#e5e7eb;"
+          />
+        </div>
+        <div class="filters-row" style="margin-bottom:12px;">
+          <label>Orden
+            <select id="tasks-sort">
+              <option value="all" selected>Todos</option>
+              <option value="start-desc">Inicio más cercano</option>
+              <option value="start-asc">Inicio más lejano</option>
+              <option value="created-desc">Creación reciente</option>
+              <option value="created-asc">Creación antigua</option>
+            </select>
+          </label>
+          <label>Duración mín (min)
+            <input type="number" id="tasks-min-duration" min="0" />
+          </label>
+          <label>Estado
+            <select id="tasks-status-filter">
+              <option value="">Todos</option>
+              <option value="IN_PROGRESS">En proceso</option>
+              <option value="PAUSED">Detenida</option>
+              <option value="COMPLETED">Terminada</option>
+            </select>
+          </label>
+          <label>Tags
+            <input type="text" id="tasks-tag-filter" placeholder="ej: work, feature" />
+          </label>
+          <button id="tasks-refresh" type="button" title="Ver todos" style="background:#374151; padding:6px 8px;">↻</button>
+          <!-- botones rápidos eliminados -->
+        </div>
+        <ul id="tasks" class="collapsible expanded"></ul>
+        <div id="week-view-container" class="hidden" style="margin-top:12px;">
+          <h3 style="margin-bottom:8px;">Semana (Lunes a Viernes)</h3>
+          <div id="week-view"></div>
+        </div>
+        <!-- Modal Calendario de tareas -->
+        <div id="tasks-calendar-modal" style="display:none; position:fixed; inset:0; background:rgba(2,6,23,0.7); backdrop-filter: blur(2px); z-index:1000; align-items:center; justify-content:center;">
+          <div style="background:#0b1220; color:#e5e7eb; padding:16px; border:1px solid #1f2937; border-radius:12px; width:92%; max-width:720px; box-shadow:0 20px 50px rgba(0,0,0,0.6);">
+            <div style="display:flex; align-items:center; justify-content:space-between; margin-bottom:12px;">
+              <strong style="font-size:18px;">Calendario de tareas</strong>
+              <div style="display:flex; align-items:center; gap:8px;">
+                <button id="cal-prev" style="background:#374151; color:#fff; padding:6px 10px; border:none; border-radius:6px; cursor:pointer;">◀</button>
+                <div id="cal-header" style="min-width:160px; text-align:center; font-weight:600; color:#cbd5e1;"></div>
+                <button id="cal-next" style="background:#374151; color:#fff; padding:6px 10px; border:none; border-radius:6px; cursor:pointer;">▶</button>
+                <button id="cal-close" style="background:#ef4444; color:#fff; padding:6px 10px; border:none; border-radius:6px; cursor:pointer;">Cerrar</button>
+              </div>
+            </div>
+            <div id="cal-grid" style="display:grid; grid-template-columns: repeat(7, 1fr); gap:8px;">
+              <!-- headers and days rendered by JS -->
+            </div>
+            <div style="display:flex; align-items:center; justify-content:space-between; margin-top:12px;">
+              <small style="color:#cbd5e1;">Leyenda: <span style="display:inline-block; width:10px; height:10px; background:#7c2d12; border:1px solid #f59e0b; border-radius:2px; vertical-align:middle; margin:0 4px 0 8px;"></span> Pasado <span style="display:inline-block; width:10px; height:10px; background:#0b2a5b; border:1px solid #3b82f6; border-radius:2px; vertical-align:middle; margin:0 4px 0 12px;"></span> Futuro</small>
+              <small style="color:#94a3b8;">Doble click en 📅 Calendario para limpiar filtro</small>
+            </div>
+          </div>
+        </div>
+      </section>
+      <section data-section="tasks-board" id="tasks-board-section">
+        <h2>Tablero de horarios</h2>
+        <div id="tasks-board" class="tasks-board">
+          <!-- Hour columns will be rendered by main.js -->
+        </div>
+      </section>
+      <section id="payments-section" data-section="payments" class="hidden">
+        <h2>Crear pago</h2>
+        <button id="payment-create-toggle" type="button" style="background:#3b82f6; color:#fff; padding:8px 12px; border-radius:6px; border:none; cursor:pointer; margin-bottom:8px;">Crear pago</button>
+        <form id="payment-create-form" style="display:none;">
+          <label>Título<br/><input name="title" required /></label><br/>
+          <label>Monto<br/><input name="amount" type="number" step="0.01" required /></label><br/>
+          <label>Tipo<br/>
+            <select name="type" required>
+              <!-- Por defecto: Gasto extra -->
+              <option value="EXTRA_EXPENSE" selected>Gasto extra</option>
+              <option value="FIXED_EXPENSE">Gasto fijo</option>
+              <option value="INCOME">Ingreso</option>
+            </select>
+          </label><br/>
+          <label>Banco<br/>
+            <select name="bank" required>
+              <option value="FALABELLA">BANCO FALABELLA</option>
+              <option value="ESTADO">BANCO ESTADO</option>
+              <option value="CHILE">BANCO DE CHILE</option>
+              <option value="SANTANDER">BANCO SANTANDER</option>
+            </select>
+          </label><br/>
+          <label>Mes (YYYY-MM)<br/>
+            <span style="display:flex; align-items:center; gap:6px;">
+              <input name="month" type="month" />
+              <button id="payment-create-month-btn" type="button" title="Abrir calendario" style="background:#3b82f6; color:#fff; padding:6px 8px; border:none; border-radius:6px; cursor:pointer; display:inline-flex; align-items:center; gap:6px;">📅</button>
+              <button id="payment-create-month-clear" type="button" title="Limpiar mes" style="background:#6b7280; color:#fff; padding:6px 8px; border:none; border-radius:6px; cursor:pointer;">Limpiar</button>
+            </span>
+          </label><br/>
+          <label>Cuotas (1-58, opcional)<br/><input name="installments" type="number" min="1" max="58" /></label><br/>
+          <label>Cuota actual pagada (0 si ninguna)<br/><input name="paidInstallments" type="number" min="0" max="58" /></label><br/>
+          <button type="submit">Crear pago</button>
+        </form>
+
+        <h2 style="margin-top: 16px;">Lista de pagos <button id="toggle-payments" class="toggle-list-btn" type="button">Contraer</button> <button id="payments-censor-toggle" type="button" title="Ocultar contenido" style="background:#6b7280; margin-left:8px;">Modo P: OFF</button> <button id="payments-refresh" type="button" title="Ver todos" style="background:#374151; padding:6px 8px; margin-left:8px;">↻</button></h2>
+        <div class="filters-row" style="margin-bottom:12px;">
+          <label>Banco
+            <select id="payments-bank-filter" style="background:#0b1220; color:#e5e7eb; border:1px solid #334155; border-radius:6px; padding:6px 8px;">
+              <option value="">Todos</option>
+              <option value="FALABELLA">BANCO FALABELLA</option>
+              <option value="ESTADO">BANCO ESTADO</option>
+              <option value="SANTANDER">BANCO SANTANDER</option>
+            </select>
+          </label>
+          <label>Tipo
+            <select id="payments-type-filter" style="background:#0b1220; color:#e5e7eb; border:1px solid #334155; border-radius:6px; padding:6px 8px;">
+              <option value="">Todos</option>
+              <option value="INCOME">Ingreso</option>
+              <option value="FIXED_EXPENSE">Gasto fijo</option>
+              <option value="EXTRA_EXPENSE">Gasto extra</option>
+            </select>
+          </label>
+          <label>Estado
+            <select id="payments-status-filter" style="background:#0b1220; color:#e5e7eb; border:1px solid #334155; border-radius:6px; padding:6px 8px;">
+              <option value="">Todos</option>
+              <option value="PAYING">Pagando</option>
+              <option value="PAID">Pagado</option>
+              <option value="PAUSED">Detenido</option>
+            </select>
+          </label>
+          <label>Mes
+            <span style="display:flex; align-items:center; gap:6px;">
+              <input type="month" id="payments-month-filter" style="background:#0b1220; color:#e5e7eb; border:1px solid #334155; border-radius:6px; padding:6px 8px;" />
+              <button id="payments-month-btn" type="button" title="Abrir calendario" style="background:#3b82f6; color:#fff; padding:6px 8px; border:none; border-radius:6px; cursor:pointer;">📅</button>
+              <button id="payments-month-clear" type="button" title="Limpiar mes" style="background:#6b7280; color:#fff; padding:6px 8px; border:none; border-radius:6px; cursor:pointer;">Limpiar</button>
+            </span>
+          </label>
+        </div>
+        <ul id="payments" class="collapsible expanded"></ul>
+
+        <!-- Charts containers -->
+        <div class="payments-summary-box">
+          <div class="payments-summary">
+            <div class="canvas-wrap">
+              <span class="canvas-title">Gastos vs Ingresos</span>
+              <canvas id="payments-pie" width="720" height="260"></canvas>
+            </div>
+            <div class="legend">
+              <div class="legend-item"><span class="legend-dot" style="background:#ef4444;"></span><span class="legend-label">Gasto fijo:</span> <span id="legend-fixed" class="legend-value">$0</span></div>
+              <div class="legend-item"><span class="legend-dot" style="background:#f59e0b;"></span><span class="legend-label">Gasto extra:</span> <span id="legend-extra" class="legend-value">$0</span></div>
+              <div class="legend-item"><span class="legend-dot" style="background:#10b981;"></span><span class="legend-label">Ingresos:</span> <span id="legend-income" class="legend-value">$0</span></div>
+              <div class="legend-item"><span class="legend-dot" style="background:linear-gradient(45deg,#ef4444,#f59e0b);"></span><span class="legend-label">Total (sin ingresos):</span> <span id="legend-total" class="legend-value">$0</span></div>
+              <div class="legend-item"><span class="legend-dot" style="background:linear-gradient(45deg,#10b981,#ef4444);"></span><span class="legend-label">Balance (ingresos - gastos):</span> <span id="legend-balance" class="legend-value">$0</span></div>
+            </div>
+          </div>
+        </div>
+      </section>
+    </div>
+    <script src="/main.js"></script>
+  </body>
+</html>
