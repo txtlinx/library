@@ -1,6 +1,27 @@
-body { font-family: system-ui, -apple-system, 'Segoe UI', Roboto, 'Helvetica Neue', Arial; background: #0f172a; color: #e5e7eb; margin: 0; padding: 20px; line-height: 1.6; }
+:root {
+  --bg: #020617;
+  --panel: #0b1220;
+  --panel-2: #0a0f1e;
+  --border: #1f2937;
+  --border-2: #334155;
+  --text: #e5e7eb;
+  --muted: #94a3b8;
+  --shadow: 0 10px 30px rgba(0,0,0,0.4);
+  --radius: 12px;
+  --radius-sm: 8px;
+  --space: 12px;
+  --primary: #3b82f6;
+  --success: #10b981;
+  --warning: #f59e0b;
+  --danger: #ef4444;
+  --neutral: #6b7280;
+}
+
+html, body { background: var(--bg); color: var(--text); }
+
+body { font-family: system-ui, -apple-system, 'Segoe UI', Roboto, 'Helvetica Neue', Arial; margin: 0; padding: 20px; line-height: 1.6; }
 html { font-size: 16px; }
-.container { max-width: 920px; margin: 0 auto; background: #111827; padding: 32px; border-radius: 8px; box-shadow: 0 4px 12px rgba(0,0,0,0.4); }
+.container { width: 100%; max-width: 100%; box-sizing: border-box; padding: var(--space); background: var(--panel); border-radius: 8px; box-shadow: 0 4px 12px rgba(0,0,0,0.4); }
 h1 { margin-top: 0; color: #f8fafc; font-size: 30px; letter-spacing: 0.2px; }
 h2 { font-size: 22px; margin-top: 0; margin-bottom: 10px; color: #e5e7eb; letter-spacing: 0.2px; }
 form input, form textarea { width: 100%; padding: 8px; margin-top: 6px; margin-bottom: 12px; border: 1px solid #334155; border-radius: 6px; background: #0b1220; color: #e5e7eb; }
@@ -214,11 +235,11 @@ label { color: #e5e7eb; display: block; font-weight: 600; margin-bottom: 6px; }
 /* Payments summary layout tweaks */
 .payments-summary-box { width: 100%; }
 .payments-summary { display:flex; gap:10px; align-items:flex-start; width:100%; justify-content:space-between; flex-wrap: wrap; }
-.canvas-wrap { flex: 1 1 520px; min-width: 280px; padding: 8px; }
-.legend { flex: 1 1 240px; min-width: 220px; }
-.legend-item { padding: 6px 8px; }
-.legend-label { font-size: 11px; }
-.legend-value { font-size: 14px; min-width: auto; }
+.canvas-wrap { flex: 1 1 520px; min-width: 280px; padding: 8px; background: var(--panel); border: 1px solid var(--border); border-radius: var(--radius); box-shadow: var(--shadow); }
+.legend { flex: 1 1 240px; min-width: 220px; display:flex; flex-direction:column; gap:8px; }
+.legend-item { display:flex; align-items:center; gap:8px; padding:8px 10px; border:1px solid var(--border); border-radius:10px; background: var(--panel); box-shadow: 0 4px 14px rgba(0,0,0,0.25); justify-content:space-between; }
+.legend-label { color: var(--muted); font-size: 12px; }
+.legend-value { color: var(--text); font-weight: 700; margin-left:auto; text-align:right; min-width: 120px; }
 
 @media (max-width: 860px) {
   .payments-summary { gap: 8px; }
@@ -362,3 +383,10 @@ label { color: #e5e7eb; display: block; font-weight: 600; margin-bottom: 6px; }
 .censored .solution {
   filter: blur(6px);
 }
+
+/* Toasts */
+.toast { position: fixed; right: 16px; bottom: 16px; background: var(--panel-2); border: 1px solid var(--border); color: var(--text); padding: 10px 12px; border-radius: var(--radius-sm); box-shadow: var(--shadow); z-index: 10010; }
+
+/* Skeletons */
+.skeleton { background: linear-gradient(90deg, #0a0f1e 0%, #0e1726 50%, #0a0f1e 100%); background-size: 200% 100%; animation: shimmer 1.2s ease-in-out infinite; border-radius: var(--radius-sm); }
+@keyframes shimmer { 0% { background-position: 200% 0; } 100% { background-position: -200% 0; } }

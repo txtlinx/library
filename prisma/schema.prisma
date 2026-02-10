@@ -68,3 +68,11 @@ model Payment {
   createdAt     DateTime      @default(now())
   updatedAt     DateTime      @updatedAt
 }
+
+model Note {
+  id        Int      @id @default(autoincrement())
+  title     String
+  content   String
+  tags      String   // coma separada
+  createdAt DateTime @default(now())
+}

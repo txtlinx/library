@@ -1,12 +1,10 @@
 document.addEventListener('DOMContentLoaded', () => {
   const listEl = document.getElementById('errors');
-  const searchInput = document.getElementById('search');
   const ipEl = document.getElementById('ip');
   const timeLocalEl = document.getElementById('time-local');
   const timeSantiagoEl = document.getElementById('time-santiago');
   const nextTaskTextEl = document.getElementById('next-task-text');
   const tasksListEl = document.getElementById('tasks');
-  const taskSearchInput = document.getElementById('task-search');
   const tasksRefreshBtn = document.getElementById('tasks-refresh');
   const tasksSortSel = document.getElementById('tasks-sort');
   const tasksMinDurInput = document.getElementById('tasks-min-duration');
@@ -34,6 +32,42 @@ document.addEventListener('DOMContentLoaded', () => {
   const paymentsMonthBtn = document.getElementById('payments-month-btn');
   const paymentCreateMonthBtn = document.getElementById('payment-create-month-btn');
   const paymentCreateMonthClear = document.getElementById('payment-create-month-clear');
+  const paymentsDateFrom = document.getElementById('payments-date-from');
+  const paymentsDateTo = document.getElementById('payments-date-to');
+  const paymentsDateClear = document.getElementById('payments-date-clear');
+  const paymentsPagePrev = document.getElementById('payments-page-prev');
+  const paymentsPageNext = document.getElementById('payments-page-next');
+  const paymentsPageInfo = document.getElementById('payments-page-info');
+  const paymentsPageSizeSel = document.getElementById('payments-page-size');
+
+  // Notes selectors
+  const notesListEl = document.getElementById('notes');
+  const noteCreateToggle = document.getElementById('note-create-toggle');
+  const notesPagePrev = document.getElementById('notes-page-prev');
+  const notesPageNext = document.getElementById('notes-page-next');
+  const notesPageInfo = document.getElementById('notes-page-info');
+  const notesPageSizeSel = document.getElementById('notes-page-size');
+
+  const errorsSortSel = document.getElementById('errors-sort');
+  const errorsTagFilterInput = document.getElementById('errors-tag-filter');
+  const errorsRefreshBtn = document.getElementById('errors-refresh');
+  const errorsPagePrev = document.getElementById('errors-page-prev');
+  const errorsPageNext = document.getElementById('errors-page-next');
+  const errorsPageInfo = document.getElementById('errors-page-info');
+  const errorsPageSizeSel = document.getElementById('errors-page-size');
+
+  const tasksDateFrom = document.getElementById('tasks-date-from');
+  const tasksDateTo = document.getElementById('tasks-date-to');
+  const tasksDateClear = document.getElementById('tasks-date-clear');
+  const tasksPagePrev = document.getElementById('tasks-page-prev');
+  const tasksPageNext = document.getElementById('tasks-page-next');
+  const tasksPageInfo = document.getElementById('tasks-page-info');
+  const tasksPageSizeSel = document.getElementById('tasks-page-size');
+
+  let allErrors = [];
+  let filteredErrors = [];
+  let errorsPage = 1;
+  let errorsPageSize = 10;
 
   let allTasks = [];
   let filteredTasks = [];
@@ -41,6 +75,19 @@ document.addEventListener('DOMContentLoaded', () => {
   let allPayments = [];
   let filteredPayments = [];
   let paymentsChart = null;
+
+  let tasksPage = 1;
+  let tasksPageSize = 10;
+
+  // Estado de paginación
+  let paymentsPage = 1;
+  let paymentsPageSize = 10;
+
+  // Notes state
+  let allNotes = [];
+  let filteredNotes = [];
+  let notesPage = 1;
+  let notesPageSize = 10;
 
   const STATUS_ES = { PAYING: 'Pagando', PAID: 'Pagado', PAUSED: 'Detenido' };
   const STATUS_BADGE = {
@@ -54,6 +101,10 @@ document.addEventListener('DOMContentLoaded', () => {
     'Gasto fijo': { bg:'#7c2d12', fg:'#fde68a' },
     'Ingreso': { bg:'#065f46', fg:'#d1fae5' }
   };
+
+  function applyBtn(el, variant='primary'){ if (!el) return; el.classList.add('btn'); if (variant) el.classList.add('btn-'+variant); }
+  function applyInput(el){ if (!el) return; el.classList.add('input'); }
+  function applyCard(el){ if (!el) return; el.classList.add('card'); }
 
   async function fetchIP() {
     if (!ipEl) return;
@@ -82,13 +133,41 @@ document.addEventListener('DOMContentLoaded', () => {
   fetchIP(); updateClocks(); setInterval(updateClocks, 1000);
 
   async function fetchErrors() {
-    try { const res = await fetch('/errors'); if (!res.ok) throw new Error('Error al obtener errores'); renderErrors(await res.json()); }
+    try { const res = await fetch('/errors'); if (!res.ok) throw new Error('Error al obtener errores'); allErrors = await res.json(); applyErrorsFilters(); }
     catch (err) { console.error(err); if (listEl) listEl.innerHTML = '<li>Error cargando errores</li>'; }
   }
-  async function searchByTag(tag) {
-    try { const res = await fetch('/errors/search/by-tag?tag=' + encodeURIComponent(tag)); if (!res.ok) throw new Error('Error en búsqueda'); renderErrors(await res.json()); }
-    catch (err) { console.error(err); if (listEl) listEl.innerHTML = '<li>Error buscando por tag</li>'; }
+
+  function applyErrorsFilters(){
+    const sort = errorsSortSel?.value || 'desc';
+    const tagQ = (errorsTagFilterInput?.value || '').trim().toLowerCase();
+    filteredErrors = (allErrors || []).filter(e => {
+      if (tagQ){ const blob = [e.title, e.message, Array.isArray(e.tags)? e.tags.join(',') : e.tags].filter(Boolean).join(' ').toLowerCase(); if (!blob.includes(tagQ)) return false; }
+      return true;
+    });
+    filteredErrors.sort((a,b)=>{
+      const da = a.createdAt? new Date(a.createdAt).getTime() : 0;
+      const db = b.createdAt? new Date(b.createdAt).getTime() : 0;
+      return sort==='asc' ? da - db : db - da;
+    });
+    errorsPage = 1;
+    renderErrorsPage();
   }
+  function renderErrorsPage(){
+    const total = filteredErrors.length; const pages = Math.max(1, Math.ceil(total / errorsPageSize));
+    errorsPage = Math.min(Math.max(1, errorsPage), pages);
+    const start = (errorsPage - 1) * errorsPageSize;
+    const slice = filteredErrors.slice(start, start + errorsPageSize);
+    renderErrors(slice);
+    if (errorsPageInfo) errorsPageInfo.textContent = `Página ${errorsPage} de ${pages} · ${total} ítems`;
+    if (errorsPagePrev) errorsPagePrev.disabled = errorsPage <= 1;
+    if (errorsPageNext) errorsPageNext.disabled = errorsPage >= pages;
+  }
+  errorsSortSel?.addEventListener('change', applyErrorsFilters);
+  errorsTagFilterInput?.addEventListener('input', ()=>{ applyErrorsFilters(); });
+  errorsRefreshBtn?.addEventListener('click', ()=>{ errorsTagFilterInput && (errorsTagFilterInput.value=''); errorsSortSel && (errorsSortSel.value='desc'); applyErrorsFilters(); });
+  errorsPagePrev?.addEventListener('click', ()=>{ errorsPage = Math.max(1, errorsPage - 1); renderErrorsPage(); });
+  errorsPageNext?.addEventListener('click', ()=>{ errorsPage = errorsPage + 1; renderErrorsPage(); });
+  errorsPageSizeSel?.addEventListener('change', ()=>{ errorsPageSize = parseInt(errorsPageSizeSel.value || '10', 10) || 10; errorsPage = 1; renderErrorsPage(); });
 
   // Modal de mensajes (reutilizable)
   function ensureMessageModal() {
@@ -106,7 +185,7 @@ document.addEventListener('DOMContentLoaded', () => {
           <div id="msg-title" style="font-weight:600;margin-bottom:8px;color:#e5e7eb;">Mensaje</div>
           <div id="msg-body" style="margin-bottom:12px;color:#cbd5e1;"></div>
           <div style="display:flex;justify-content:flex-end;">
-            <button id="msg-ok" style="background:#0ea5e9;color:#f9fafb;border:none;border-radius:8px;padding:6px 10px;cursor:pointer;">Cerrar</button>
+            <button id="msg-ok" class="btn btn-primary">Cerrar</button>
           </div>
         </div>`;
       document.body.appendChild(overlay);
@@ -139,12 +218,12 @@ document.addEventListener('DOMContentLoaded', () => {
         <div class="form-modal" role="dialog" aria-modal="true" aria-labelledby="form-title" style="background:#020617;border:1px solid #1f2937;border-radius:12px;max-width:520px;width:92%;padding:16px;box-shadow:0 20px 60px rgba(0,0,0,0.7);max-height:90vh;overflow:auto;">
           <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;">
             <div id="form-title" style="font-weight:700;color:#f8fafc;">Formulario</div>
-            <button id="form-close" style="background:transparent;border:none;color:#9ca3af;cursor:pointer;font-size:18px;">×</button>
+            <button id="form-close" class="btn btn-neutral" style="font-size:14px;padding:4px 8px;">×</button>
           </div>
           <div id="form-body" style="color:#cbd5e1;"></div>
           <div style="display:flex;justify-content:flex-end;gap:8px;margin-top:12px;">
-            <button id="form-cancel" style="background:#4b5563;color:#e5e7eb;border:none;border-radius:8px;padding:6px 10px;cursor:pointer;">Cancelar</button>
-            <button id="form-submit" style="background:#10b981;color:#f9fafb;border:none;border-radius:8px;padding:6px 10px;cursor:pointer;">Guardar</button>
+            <button id="form-cancel" class="btn btn-neutral">Cancelar</button>
+            <button id="form-submit" class="btn btn-success">Guardar</button>
           </div>
         </div>`;
       document.body.appendChild(overlay);
@@ -231,12 +310,12 @@ document.addEventListener('DOMContentLoaded', () => {
       if (Array.isArray(e.images) && e.images.length>0) {
         btnToggle=document.createElement('button'); btnToggle.textContent=`Ver imágenes (${e.images.length})`; btnToggle.className='button-toggle-images'; btnToggle.style.marginTop='8px'; btnToggle.style.marginRight='8px'; btnToggle.style.background='#374151'; btnToggle.style.borderRadius='6px'; btnToggle.style.padding='6px 10px'; btnToggle.style.border='none'; btnToggle.style.cursor='pointer';
         thumbs=document.createElement('div'); thumbs.className='thumbnails'; thumbs.style.marginTop='8px'; thumbs.style.gap='8px'; thumbs.style.flexWrap='wrap';
-        e.images.forEach(src=>{ const img=document.createElement('img'); img.src=src; img.alt=e.title||'imagen'; img.className='thumb'; img.style.cursor='pointer'; img.style.width='80px'; img.style.height='60px'; img.style.objectFit='cover'; img.style.borderRadius='6px'; img.style.border='1px solid #e5e7eb'; img.addEventListener('click',()=>{ const overlay=document.createElement('div'); overlay.style.position='fixed'; overlay.style.left='0'; overlay.style.top='0'; overlay.style.width='100%'; overlay.style.height='100%'; overlay.style.background='rgba(0,0,0,0.6)'; overlay.style.display='flex'; overlay.style.alignItems='center'; overlay.style.justifyContent='center'; overlay.style.zIndex='9999'; const big=document.createElement('img'); big.src=src; big.style.maxWidth='90%'; big.style.maxHeight='90%'; big.style.borderRadius='8px'; big.style.boxShadow='0 10px 30px rgba(0,0,0,0.4)'; overlay.appendChild(big); overlay.addEventListener('click',()=>document.body.removeChild(overlay)); document.body.appendChild(overlay); }); thumbs.appendChild(img); });
+        e.images.forEach(src=>{ const img=document.createElement('img'); img.src=src; img.alt=e.title||'imagen'; img.className='thumb card'; img.style.cursor='pointer'; img.style.width='80px'; img.style.height='60px'; img.style.objectFit='cover'; img.style.borderRadius='6px'; img.style.border='1px solid #e5e7eb'; img.addEventListener('click',()=>{ const overlay=document.createElement('div'); overlay.style.position='fixed'; overlay.style.left='0'; overlay.style.top='0'; overlay.style.width='100%'; overlay.style.height='100%'; overlay.style.background='rgba(0,0,0,0.6)'; overlay.style.display='flex'; overlay.style.alignItems='center'; overlay.style.justifyContent='center'; overlay.style.zIndex='9999'; const big=document.createElement('img'); big.src=src; big.style.maxWidth='90%'; big.style.maxHeight='90%'; big.style.borderRadius='8px'; big.style.boxShadow='0 10px 30px rgba(0,0,0,0.4)'; overlay.appendChild(big); overlay.addEventListener('click',()=>document.body.removeChild(overlay)); document.body.appendChild(overlay); }); thumbs.appendChild(img); });
         btnToggle.addEventListener('click',()=>{ const vis=thumbs.classList.toggle('visible'); btnToggle.textContent = vis ? `Ocultar imágenes (${e.images.length})` : `Ver imágenes (${e.images.length})`; });
       }
       // Botones
-      const btnUpdate=document.createElement('button'); btnUpdate.textContent='Actualizar'; btnUpdate.style.marginLeft='8px'; btnUpdate.style.background='#06b6d4'; btnUpdate.style.borderRadius='6px'; btnUpdate.style.padding='6px 10px'; btnUpdate.style.border='none'; btnUpdate.style.cursor='pointer';
-      const btnDelete=document.createElement('button'); btnDelete.textContent='Eliminar'; btnDelete.style.marginLeft='12px'; btnDelete.style.background='#ef4444'; btnDelete.style.borderRadius='6px'; btnDelete.style.padding='6px 10px'; btnDelete.style.border='none'; btnDelete.style.cursor='pointer';
+      const btnUpdate=document.createElement('button'); btnUpdate.textContent='Actualizar'; applyBtn(btnUpdate, 'primary');
+      const btnDelete=document.createElement('button'); btnDelete.textContent='Eliminar'; btnDelete.className='btn btn-danger';
       btnUpdate.addEventListener('click',()=>openEditModal(e));
       btnDelete.addEventListener('click', async ()=>{ const confirmed = await showConfirm('¿Eliminar este error?'); if (!confirmed) return; try { const res = await fetch('/errors/'+e.id,{method:'DELETE'}); if (!res.ok) throw new Error(await res.text()||'Error eliminando'); await fetchErrors(); } catch (err) { console.error(err); await showMessageModal('No se pudo eliminar el error', { title: 'Error' }); } });
       li.appendChild(viewDiv); li.appendChild(btnUpdate); if (btnToggle) li.appendChild(btnToggle); li.appendChild(btnDelete); if (thumbs) li.appendChild(thumbs);
@@ -256,10 +335,9 @@ document.addEventListener('DOMContentLoaded', () => {
           <div id="confirm-title" style="font-weight:600;margin-bottom:8px;color:#e5e7eb;">Confirmar</div>
           <div style="margin-bottom:12px;color:#cbd5e1;"><span id="confirm-message">¿Seguro?</span></div>
           <div style="display:flex;justify-content:flex-end;gap:8px;">
-            <button id="confirm-cancel" style="background:#4b5563;color:#e5e7eb;border:none;border-radius:8px;padding:6px 10px;cursor:pointer;">Cancelar</button>
-            <button id="confirm-accept" style="background:#dc2626;color:#f9fafb;border:none;border-radius:8px;padding:6px 10px;cursor:pointer;">Aceptar</button>
-          </div>
-        </div>`;
+            <button id="confirm-cancel" class="btn btn-neutral">Cancelar</button>
+            <button id="confirm-accept" class="btn btn-danger">Aceptar</button>
+          </div>`;
       document.body.appendChild(overlay);
     }
     return overlay;
@@ -274,7 +352,7 @@ document.addEventListener('DOMContentLoaded', () => {
   // Tabs y contraer listas
   const sections = document.querySelectorAll('[data-section]'); const tabButtons = document.querySelectorAll('.tab-btn[data-tab]');
   function showTab(tab){ sections.forEach(sec=>{ const sTab=sec.getAttribute('data-section'); if (!sTab) return; sec.classList.toggle('hidden', sTab!==tab && !(tab==='tasks' && sTab==='tasks-board')); }); tabButtons.forEach(btn=>{ btn.classList.toggle('active', btn.getAttribute('data-tab')===tab); }); }
-  tabButtons.forEach(btn=>{ btn.addEventListener('click',()=>{ const tab=btn.getAttribute('data-tab'); if (!tab) return; showTab(tab); if (tab==='errors') fetchErrors(); if (tab==='tasks') { if (typeof fetchTasks === 'function') fetchTasks(); } if (tab==='payments') { if (typeof fetchPayments === 'function') fetchPayments(); } }); });
+  tabButtons.forEach(btn=>{ btn.addEventListener('click',()=>{ const tab=btn.getAttribute('data-tab'); if (!tab) return; showTab(tab); if (tab==='errors') fetchErrors(); if (tab==='tasks') { if (typeof fetchTasks === 'function') fetchTasks(); } if (tab==='payments') { if (typeof fetchPayments === 'function') fetchPayments(); } if (tab==='notes') { if (typeof fetchNotes === 'function') fetchNotes(); } }); });
   function setupToggleList(buttonId, listSelector){ const btn=document.getElementById(buttonId); const list=document.querySelector(listSelector); if (!btn || !list) return; btn.addEventListener('click',()=>{ const collapsed=list.classList.toggle('collapsed'); btn.textContent = collapsed ? 'Expandir' : 'Contraer'; }); }
 
   // Persistencia de Modo P en localStorage por sección
@@ -303,18 +381,69 @@ document.addEventListener('DOMContentLoaded', () => {
   applyCensorState('errors-censor-toggle', 'errors-section');
   applyCensorState('tasks-censor-toggle', 'tasks-section');
   applyCensorState('payments-censor-toggle', 'payments-section');
+  applyCensorState('notes-censor-toggle', 'notes-section');
   setupPersistentCensorToggle('errors-censor-toggle', 'errors-section');
   setupPersistentCensorToggle('tasks-censor-toggle', 'tasks-section');
   setupPersistentCensorToggle('payments-censor-toggle', 'payments-section');
+  setupPersistentCensorToggle('notes-censor-toggle', 'notes-section');
 
-  // Búsqueda por tags
-  function debounce(fn, wait){ let t; return (...args)=>{ clearTimeout(t); t=setTimeout(()=>fn(...args), wait); }; }
-  const onSearch = debounce((ev)=>{ const q=ev.target.value.trim(); if (!q) fetchErrors(); else searchByTag(q); }, 300);
-  if (searchInput) searchInput.addEventListener('input', onSearch);
+  function applyTaskFilters() {
+    const q = ''; // se retiró input de búsqueda superior
+    const minDur = parseInt(tasksMinDurInput?.value || '0', 10) || 0;
+    const status = tasksStatusSel?.value || '';
+    const tagFilter = (tasksTagFilterInput?.value || '').trim().toLowerCase();
+    const sort = tasksSortSel?.value || 'all';
+    const from = tasksDateFrom?.value || '';
+    const to = tasksDateTo?.value || '';
+    filteredTasks = allTasks.filter(t => {
+      // min duration
+      if (minDur > 0 && (t.durationMinutes || 0) < minDur) return false;
+      // status
+      if (status && t.status !== status) return false;
+      // tag filter: match any
+      if (tagFilter) {
+        const tags = Array.isArray(t.tags) ? t.tags.map(x => x.toLowerCase()) : String(t.tags || '').toLowerCase().split(',').map(s=>s.trim()).filter(Boolean);
+        if (!tags.some(x => x.includes(tagFilter))) return false;
+      }
+      // rango fechas por startAt
+      if (from){ const f = new Date(from + 'T00:00:00'); const ts = t.startAt ? new Date(t.startAt) : null; if (!ts || ts < f) return false; }
+      if (to){ const tt = new Date(to + 'T23:59:59'); const ts = t.startAt ? new Date(t.startAt) : null; if (!ts || ts > tt) return false; }
+      return true;
+    });
+    // sort
+    const byDate = (a,b,prop) => { const da = a[prop] ? new Date(a[prop]).getTime() : 0; const db = b[prop] ? new Date(b[prop]).getTime() : 0; return da - db; };
+    if (sort === 'start-desc') filteredTasks.sort((a,b)=>byDate(b,a,'startAt'));
+    else if (sort === 'start-asc') filteredTasks.sort((a,b)=>byDate(a,b,'startAt'));
+    else if (sort === 'created-desc') filteredTasks.sort((a,b)=>byDate(b,a,'createdAt'));
+    else if (sort === 'created-asc') filteredTasks.sort((a,b)=>byDate(a,b,'createdAt'));
+
+    tasksPage = 1;
+    renderTasksPage();
+    updateNextTaskMarquee(filteredTasks);
+    renderWeekView(filteredTasks);
+    renderTaskFilterChips();
+  }
+  function renderTasksPage(){
+    const total = filteredTasks.length; const pages = Math.max(1, Math.ceil(total / tasksPageSize));
+    tasksPage = Math.min(Math.max(1, tasksPage), pages);
+    const start = (tasksPage - 1) * tasksPageSize;
+    const slice = filteredTasks.slice(start, start + tasksPageSize);
+    renderTasks(slice);
+    if (tasksPageInfo) tasksPageInfo.textContent = `Página ${tasksPage} de ${pages} · ${total} ítems`;
+    if (tasksPagePrev) tasksPagePrev.disabled = tasksPage <= 1;
+    if (tasksPageNext) tasksPageNext.disabled = tasksPage >= pages;
+  }
+  tasksPagePrev?.addEventListener('click', ()=>{ tasksPage = Math.max(1, tasksPage - 1); renderTasksPage(); });
+  tasksPageNext?.addEventListener('click', ()=>{ tasksPage = tasksPage + 1; renderTasksPage(); });
+  tasksPageSizeSel?.addEventListener('change', ()=>{ tasksPageSize = parseInt(tasksPageSizeSel.value || '10', 10) || 10; tasksPage = 1; renderTasksPage(); });
+  tasksDateFrom?.addEventListener('change', applyTaskFilters);
+  tasksDateTo?.addEventListener('change', applyTaskFilters);
+  tasksDateClear?.addEventListener('click', ()=>{ if (tasksDateFrom) tasksDateFrom.value=''; if (tasksDateTo) tasksDateTo.value=''; applyTaskFilters(); });
 
   // Botón Crear error -> modal
   const createBtn = document.getElementById('error-create-toggle');
   if (createBtn) {
+    applyBtn(createBtn, 'primary');
     createBtn.textContent = 'Crear error';
     createBtn.addEventListener('click', () => {
       showFormModal({
@@ -338,6 +467,7 @@ document.addEventListener('DOMContentLoaded', () => {
           try {
             const res = await fetch('/errors', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
             if (!res.ok) throw new Error(await res.text());
+            showToast('Error creado', 'success');
             const created = await res.json(); const errorId = created.id;
             const files = values.images;
             if (files && files.length > 0) {
@@ -467,6 +597,7 @@ document.addEventListener('DOMContentLoaded', () => {
     if (arr.length === 0) { tasksListEl.innerHTML = '<li>No hay tareas</li>'; return; }
     arr.forEach(t => {
       const li = document.createElement('li');
+      applyCard(li);
       li.style.border = '1px solid #1f2937'; li.style.borderRadius='10px'; li.style.padding='10px'; li.style.background='#0b1220'; li.style.boxShadow='0 4px 14px rgba(0,0,0,0.25)'; li.style.marginBottom='8px';
       const startTxt = formatDateTime(t.startAt);
       const tagsTxt = Array.isArray(t.tags) ? t.tags.map(escapeHtml).join(', ') : escapeHtml(t.tags || '');
@@ -497,17 +628,17 @@ document.addEventListener('DOMContentLoaded', () => {
       // Actions
       const actions = document.createElement('div');
       actions.style.marginTop = '8px';
-      const mkBtn = (label, bg) => { const b=document.createElement('button'); b.textContent=label; b.style.background=bg; b.style.color='#fff'; b.style.padding='6px 10px'; b.style.border='none'; b.style.borderRadius='6px'; b.style.cursor='pointer'; b.style.marginRight='8px'; return b; };
-      const btnEdit = mkBtn('✏️ Editar', '#3b82f6');
-      const btnPause = mkBtn('Pausar', '#6b7280');
-      const btnStart = mkBtn('Reanudar', '#06b6d4');
-      const btnComplete = mkBtn('Completar', '#10b981');
-      const btnDelete = mkBtn('Eliminar', '#ef4444');
+      const mkBtn = (label, bg, variant='neutral') => { const b=document.createElement('button'); b.textContent=label; applyBtn(b, variant); b.style.background=bg; return b; };
+      const btnEdit = mkBtn('✏️ Editar', '#3b82f6', 'primary');
+      const btnPause = mkBtn('Pausar', '#6b7280', 'neutral');
+      const btnStart = mkBtn('Reanudar', '#06b6d4', 'primary');
+      const btnComplete = mkBtn('Completar', '#10b981', 'success');
+      const btnDelete = mkBtn('Eliminar', '#ef4444', 'danger');
       btnEdit.addEventListener('click', () => openTaskEditModal(t));
       btnPause.addEventListener('click', () => updateTaskStatus(t.id, 'pause'));
       btnStart.addEventListener('click', () => updateTaskStatus(t.id, 'start'));
       btnComplete.addEventListener('click', () => updateTaskStatus(t.id, 'complete'));
-      btnDelete.addEventListener('click', async () => { const ok = await showConfirm('¿Eliminar esta tarea?'); if (!ok) return; try { const res = await fetch('/tasks/' + t.id, { method: 'DELETE' }); if (!res.ok) throw new Error(await res.text()); await fetchTasks(true); } catch (err) { console.error(err); await showMessageModal('No se pudo eliminar la tarea', { title: 'Error' }); } });
+      btnDelete.addEventListener('click', async () => { const ok = await showConfirm('¿Eliminar esta tarea?'); if (!ok) return; try { const res = await fetch('/tasks/' + t.id, { method: 'DELETE' }); if (!res.ok) throw new Error(await res.text()); showToast('Tarea eliminada', 'success'); await fetchTasks(true); } catch (err) { console.error(err); await showMessageModal('No se pudo eliminar la tarea', { title: 'Error' }); } });
       actions.appendChild(btnEdit); actions.appendChild(btnPause); actions.appendChild(btnStart); actions.appendChild(btnComplete); actions.appendChild(btnDelete);
 
       // Lógica de habilitación: Start y Pause
@@ -561,6 +692,7 @@ document.addEventListener('DOMContentLoaded', () => {
         try {
           const res = await fetch('/tasks/' + t.id, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
           if (!res.ok) throw new Error(await res.text());
+          showToast('Tarea actualizada', 'success');
           await fetchTasks(true);
         } catch (err) {
           console.error(err);
@@ -580,6 +712,7 @@ document.addEventListener('DOMContentLoaded', () => {
     try {
       const res = await fetch(`/tasks/${id}/${action}`, { method: 'PATCH' });
       if (!res.ok) throw new Error(await res.text());
+      showToast('Estado de tarea actualizado', 'success');
       if (action === 'pause') {
         const rec = taskTimers.get(String(id));
         if (rec) {
@@ -596,36 +729,16 @@ document.addEventListener('DOMContentLoaded', () => {
     }
   }
 
-  function applyTaskFilters() {
-    const q = (taskSearchInput?.value || '').trim().toLowerCase();
-    const minDur = parseInt(tasksMinDurInput?.value || '0', 10) || 0;
-    const status = tasksStatusSel?.value || '';
-    const tagFilter = (tasksTagFilterInput?.value || '').trim().toLowerCase();
-    const sort = tasksSortSel?.value || 'all';
-    filteredTasks = allTasks.filter(t => {
-      // text match
-      const blob = [t.title, t.description, t.tags?.join(','), t.status].filter(Boolean).join(' ').toLowerCase();
-      if (q && !blob.includes(q)) return false;
-      // min duration
-      if (minDur > 0 && (t.durationMinutes || 0) < minDur) return false;
-      // status
-      if (status && t.status !== status) return false;
-      // tag filter: match any
-      if (tagFilter) {
-        const tags = Array.isArray(t.tags) ? t.tags.map(x => x.toLowerCase()) : String(t.tags || '').toLowerCase().split(',').map(s=>s.trim()).filter(Boolean);
-        if (!tags.some(x => x.includes(tagFilter))) return false;
-      }
-      return true;
-    });
-    // sort
-    const byDate = (a,b,prop) => { const da = a[prop] ? new Date(a[prop]).getTime() : 0; const db = b[prop] ? new Date(b[prop]).getTime() : 0; return da - db; };
-    if (sort === 'start-desc') filteredTasks.sort((a,b)=>byDate(b,a,'startAt'));
-    else if (sort === 'start-asc') filteredTasks.sort((a,b)=>byDate(a,b,'startAt'));
-    else if (sort === 'created-desc') filteredTasks.sort((a,b)=>byDate(b,a,'createdAt'));
-    else if (sort === 'created-asc') filteredTasks.sort((a,b)=>byDate(a,b,'createdAt'));
-    renderTasks(filteredTasks);
-    updateNextTaskMarquee(filteredTasks);
-    renderWeekView(filteredTasks);
+  function renderTaskFilterChips(){ const hostId='task-filter-chips'; let host=document.getElementById(hostId); if (!host){ host=document.createElement('div'); host.id=hostId; host.style.margin='6px 0 10px'; const ref=document.querySelector('#tasks-section .filters-row'); if (ref && ref.parentElement) ref.parentElement.insertBefore(host, ref.nextSibling); }
+    host.innerHTML='';
+    const minDur=(tasksMinDurInput?.value||'').trim(); if (minDur){ host.appendChild(createChip('Min: '+minDur+' min', ()=>{ tasksMinDurInput.value=''; applyTaskFilters(); })); }
+    const status=(tasksStatusSel?.value||'').trim(); if (status){ host.appendChild(createChip('Estado: '+status.replace('_',' '), ()=>{ tasksStatusSel.value=''; applyTaskFilters(); })); }
+    const tags=(tasksTagFilterInput?.value||'').trim(); if (tags){ host.appendChild(createChip('Tags: '+tags, ()=>{ tasksTagFilterInput.value=''; applyTaskFilters(); })); }
+    const sort=(tasksSortSel?.value||'').trim(); if (sort && sort!=='all'){ host.appendChild(createChip('Orden: '+sort, ()=>{ tasksSortSel.value='all'; applyTaskFilters(); })); }
+    const from=(tasksDateFrom?.value||'').trim(); const to=(tasksDateTo?.value||'').trim();
+    if (from){ host.appendChild(createChip('Desde: '+from, ()=>{ tasksDateFrom.value=''; applyTaskFilters(); })); }
+    if (to){ host.appendChild(createChip('Hasta: '+to, ()=>{ tasksDateTo.value=''; applyTaskFilters(); })); }
+    if (!host.childNodes.length){ const empty=document.createElement('small'); empty.style.color='#94a3b8'; empty.textContent='Sin filtros activos'; host.appendChild(empty); }
   }
 
   function updateNextTaskMarquee(tasks) {
@@ -716,6 +829,7 @@ document.addEventListener('DOMContentLoaded', () => {
       allTasks = await res.json();
       applyTaskFilters();
       if (!force) showTab('tasks');
+      showToast('Tareas actualizadas', 'success');
     } catch (err) {
       console.error(err);
       if (tasksListEl) tasksListEl.innerHTML = '<li>Error cargando tareas</li>';
@@ -752,6 +866,7 @@ document.addEventListener('DOMContentLoaded', () => {
           try {
             const res = await fetch('/tasks', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
             if (!res.ok) throw new Error(await res.text());
+            showToast('Tarea creada', 'success');
             await fetchTasks(true);
             await showMessageModal('Tarea creada correctamente', { title: 'Nueva tarea' });
           } catch (err) {
@@ -767,13 +882,11 @@ document.addEventListener('DOMContentLoaded', () => {
   }
 
   // Filters wiring
-  const onTaskSearch = debounce(()=>applyTaskFilters(), 250);
-  taskSearchInput?.addEventListener('input', onTaskSearch);
-  tasksRefreshBtn?.addEventListener('click', () => { taskSearchInput && (taskSearchInput.value = ''); tasksMinDurInput && (tasksMinDurInput.value = ''); tasksStatusSel && (tasksStatusSel.value = ''); tasksTagFilterInput && (tasksTagFilterInput.value = ''); tasksSortSel && (tasksSortSel.value = 'all'); applyTaskFilters(); });
+  tasksRefreshBtn?.addEventListener('click', () => { tasksMinDurInput && (tasksMinDurInput.value = ''); tasksStatusSel && (tasksStatusSel.value = ''); tasksTagFilterInput && (tasksTagFilterInput.value = ''); tasksSortSel && (tasksSortSel.value = 'all'); tasksDateFrom && (tasksDateFrom.value = ''); tasksDateTo && (tasksDateTo.value = ''); applyTaskFilters(); });
   tasksSortSel?.addEventListener('change', applyTaskFilters);
   tasksMinDurInput?.addEventListener('input', applyTaskFilters);
   tasksStatusSel?.addEventListener('change', applyTaskFilters);
-  tasksTagFilterInput?.addEventListener('input', onTaskSearch);
+  tasksTagFilterInput?.addEventListener('input', applyTaskFilters);
 
   // Subtabs: list vs week
   function setTasksSubtab(which){
@@ -788,6 +901,10 @@ document.addEventListener('DOMContentLoaded', () => {
 
   // Toggle list button for tasks
   setupToggleList('toggle-tasks', '#tasks');
+  // Toggle list for payments
+  setupToggleList('toggle-payments', '#payments');
+  // Toggle list for notes
+  setupToggleList('toggle-notes', '#notes');
 
   // Calendar modal
   function openTasksCalendar(){
@@ -833,6 +950,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
       dayTasks.forEach(t => {
         const item = document.createElement('div');
+        item.className = 'card';
         item.style.marginTop='4px'; item.style.fontSize='12px'; item.style.fontWeight='600'; item.style.borderRadius='6px'; item.style.padding='2px 6px';
         // Color según estado
         if (String(t.status) === 'COMPLETED') {
@@ -862,11 +980,12 @@ document.addEventListener('DOMContentLoaded', () => {
   // wire buttons
   tasksCalendarBtn?.addEventListener('click', openTasksCalendar);
   tasksCalendarBtn?.addEventListener('dblclick', ()=>{ // limpiar filtro al doble click
-    if (taskSearchInput) taskSearchInput.value = '';
     if (tasksMinDurInput) tasksMinDurInput.value = '';
     if (tasksStatusSel) tasksStatusSel.value = '';
     if (tasksTagFilterInput) tasksTagFilterInput.value = '';
     if (tasksSortSel) tasksSortSel.value = 'all';
+    if (tasksDateFrom) tasksDateFrom.value = '';
+    if (tasksDateTo) tasksDateTo.value = '';
     applyTaskFilters();
   });
   calPrevBtn?.addEventListener('click', () => { if (calMonth === 0) { calMonth = 11; calYear--; } else calMonth--; renderCalendar(); });
@@ -910,6 +1029,7 @@ document.addEventListener('DOMContentLoaded', () => {
       const paidAmount = installments && paidInstallments ? Math.round((amount/Math.max(installments,1)) * paidInstallments) : null;
 
       const li = document.createElement('li');
+      applyCard(li);
       li.style.border = '1px solid #1f2937'; li.style.borderRadius='12px'; li.style.padding='12px'; li.style.background='#0b1220'; li.style.boxShadow='0 6px 18px rgba(0,0,0,0.3)'; li.style.marginBottom='10px';
 
       // cabecera banco + título
@@ -943,9 +1063,9 @@ document.addEventListener('DOMContentLoaded', () => {
       // acciones Editar/Eliminar
       const actions = document.createElement('div');
       actions.style.display='flex'; actions.style.gap='8px'; actions.style.marginTop='10px';
-      const mkBtn = (label, bg) => { const b=document.createElement('button'); b.textContent=label; b.style.background=bg; b.style.color='#fff'; b.style.padding='6px 10px'; b.style.border='none'; b.style.borderRadius='6px'; b.style.cursor='pointer'; return b; };
-      const btnEdit = mkBtn('✏️ Editar', '#3b82f6');
-      const btnDelete = mkBtn('Eliminar', '#ef4444');
+      const mkBtn = (label, bg, variant='neutral') => { const b=document.createElement('button'); b.textContent=label; applyBtn(b, variant); b.style.background=bg; return b; };
+      const btnEdit = mkBtn('✏️ Editar', '#3b82f6', 'primary');
+      const btnDelete = mkBtn('Eliminar', '#ef4444', 'danger');
 
       btnEdit.addEventListener('click', () => {
         showFormModal({
@@ -986,6 +1106,7 @@ document.addEventListener('DOMContentLoaded', () => {
             try {
               const res = await fetch('/payments/' + p.id, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
               if (!res.ok) throw new Error(await res.text());
+              showToast('Pago actualizado', 'success');
               await fetchPayments();
             } catch (err) {
               console.error(err);
@@ -1001,6 +1122,7 @@ document.addEventListener('DOMContentLoaded', () => {
         try {
           const res = await fetch('/payments/' + p.id, { method: 'DELETE' });
           if (!res.ok) throw new Error(await res.text());
+          showToast('Pago eliminado', 'success');
           await fetchPayments();
         } catch (err) {
           console.error(err);
@@ -1083,15 +1205,48 @@ document.addEventListener('DOMContentLoaded', () => {
     const type = paymentsTypeSel?.value || '';
     const status = paymentsStatusSel?.value || '';
     const month = paymentsMonthInput?.value || '';
+    const from = paymentsDateFrom?.value || '';
+    const to = paymentsDateTo?.value || '';
     filteredPayments = allPayments.filter(p => {
       if (bank && p.bank !== bank) return false;
       if (type && p.type !== type) return false;
       if (status && p.status !== status) return false;
       if (month && p.month !== month) return false;
+      // Rango de fechas: asume p.createdAt ISO
+      if (from){ const f = new Date(from + 'T00:00:00'); const pc = new Date(p.createdAt || p.month + '-01'); if (pc < f) return false; }
+      if (to){ const t = new Date(to + 'T23:59:59'); const pc = new Date(p.createdAt || p.month + '-01'); if (pc > t) return false; }
       return true;
     });
-    renderPayments(filteredPayments);
+    // Reiniciar página si filtros cambian
+    paymentsPage = 1;
+    renderPaymentsPage();
     renderPaymentsSummary(filteredPayments);
+    renderPaymentFilterChips();
+  }
+
+  function renderPaymentsPage(){
+    const size = paymentsPageSize;
+    const total = filteredPayments.length;
+    const pages = Math.max(1, Math.ceil(total / size));
+    paymentsPage = Math.min(Math.max(1, paymentsPage), pages);
+    const start = (paymentsPage - 1) * size;
+    const slice = filteredPayments.slice(start, start + size);
+    renderPayments(slice);
+    if (paymentsPageInfo) paymentsPageInfo.textContent = `Página ${paymentsPage} de ${pages} · ${total} ítems`;
+    if (paymentsPagePrev) paymentsPagePrev.disabled = paymentsPage <= 1;
+    if (paymentsPageNext) paymentsPageNext.disabled = paymentsPage >= pages;
+  }
+
+  function renderPaymentFilterChips(){ const hostId='payments-filter-chips'; let host=document.getElementById(hostId); if (!host){ host=document.createElement('div'); host.id=hostId; host.style.margin='6px 0 10px'; const ref=document.querySelector('#payments-section .filters-row'); if (ref && ref.parentElement) ref.parentElement.insertBefore(host, ref.nextSibling); }
+    host.innerHTML='';
+    const bank=(paymentsBankSel?.value||'').trim(); if (bank){ host.appendChild(createChip('Banco: '+bank, ()=>{ paymentsBankSel.value=''; applyPaymentsFilters(); })); }
+    const type=(paymentsTypeSel?.value||'').trim(); if (type){ host.appendChild(createChip('Tipo: '+type, ()=>{ paymentsTypeSel.value=''; applyPaymentsFilters(); })); }
+    const status=(paymentsStatusSel?.value||'').trim(); if (status){ host.appendChild(createChip('Estado: '+status, ()=>{ paymentsStatusSel.value=''; applyPaymentsFilters(); })); }
+    const month=(paymentsMonthInput?.value||'').trim(); if (month){ host.appendChild(createChip('Mes: '+month, ()=>{ paymentsMonthInput.value=''; applyPaymentsFilters(); })); }
+    const from=(paymentsDateFrom?.value||'').trim(); const to=(paymentsDateTo?.value||'').trim();
+    if (from){ host.appendChild(createChip('Desde: '+from, ()=>{ paymentsDateFrom.value=''; applyPaymentsFilters(); })); }
+    if (to){ host.appendChild(createChip('Hasta: '+to, ()=>{ paymentsDateTo.value=''; applyPaymentsFilters(); })); }
+    if (!host.childNodes.length){ const empty=document.createElement('small'); empty.style.color='#94a3b8'; empty.textContent='Sin filtros activos'; host.appendChild(empty); }
   }
 
   async function fetchPayments(){
@@ -1100,6 +1255,7 @@ document.addEventListener('DOMContentLoaded', () => {
       if (!res.ok) throw new Error('Error al obtener pagos');
       allPayments = await res.json();
       applyPaymentsFilters();
+      showToast('Pagos actualizados', 'success');
     } catch (err) {
       console.error(err);
       if (paymentsListEl) paymentsListEl.innerHTML = '<li>Error cargando pagos</li>';
@@ -1112,6 +1268,12 @@ document.addEventListener('DOMContentLoaded', () => {
   paymentsTypeSel?.addEventListener('change', applyPaymentsFilters);
   paymentsStatusSel?.addEventListener('change', applyPaymentsFilters);
   paymentsMonthInput?.addEventListener('change', applyPaymentsFilters);
+  paymentsDateFrom?.addEventListener('change', applyPaymentsFilters);
+  paymentsDateTo?.addEventListener('change', applyPaymentsFilters);
+  paymentsDateClear?.addEventListener('click', ()=>{ if (paymentsDateFrom) paymentsDateFrom.value=''; if (paymentsDateTo) paymentsDateTo.value=''; applyPaymentsFilters(); });
+  paymentsPagePrev?.addEventListener('click', ()=>{ paymentsPage = Math.max(1, paymentsPage - 1); renderPaymentsPage(); });
+  paymentsPageNext?.addEventListener('click', ()=>{ paymentsPage = paymentsPage + 1; renderPaymentsPage(); });
+  paymentsPageSizeSel?.addEventListener('change', ()=>{ paymentsPageSize = parseInt(paymentsPageSizeSel.value || '10', 10) || 10; paymentsPage = 1; renderPaymentsPage(); });
 
   // Month picker buttons
   paymentsMonthBtn?.addEventListener('click', ()=>{ try { if (paymentsMonthInput && typeof paymentsMonthInput.showPicker==='function') paymentsMonthInput.showPicker(); else paymentsMonthInput?.focus(); } catch { paymentsMonthInput?.focus(); } });
@@ -1158,6 +1320,7 @@ document.addEventListener('DOMContentLoaded', () => {
           try {
             const res = await fetch('/payments', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
             if (!res.ok) throw new Error(await res.text());
+            showToast('Pago creado', 'success');
             await fetchPayments();
             await showMessageModal('Pago creado correctamente', { title: 'Nuevo pago' });
           } catch (err) {
@@ -1169,25 +1332,9 @@ document.addEventListener('DOMContentLoaded', () => {
       // Estilizar inputs y calendario del modal
       const overlay = document.getElementById('form-overlay');
       const bodyEl = overlay?.querySelector('#form-body');
-      if (bodyEl) {
-        bodyEl.querySelectorAll('input, select').forEach(el => {
-          el.style.background='#0b1220'; el.style.color='#e5e7eb'; el.style.border='1px solid #334155'; el.style.borderRadius='8px'; el.style.padding='8px 10px';
-        });
-        // Agregar botón 📅 junto al input month
-        const monthInput = bodyEl.querySelector('input[type="month"]#month') || bodyEl.querySelector('input[type="month"]');
-        if (monthInput && !monthInput.nextSibling) {
-          const btn=document.createElement('button'); btn.type='button'; btn.textContent='📅'; btn.title='Abrir calendario';
-          btn.style.background='#3b82f6'; btn.style.color='#fff'; btn.style.border='none'; btn.style.borderRadius='6px'; btn.style.padding='6px 8px'; btn.style.cursor='pointer'; btn.style.marginLeft='8px';
-          btn.addEventListener('click', ()=>{ try { if (typeof monthInput.showPicker==='function') monthInput.showPicker(); else monthInput.focus(); } catch { monthInput.focus(); } });
-          monthInput.parentElement?.appendChild(btn);
-        }
-      }
+      if (bodyEl) { bodyEl.querySelectorAll('input, textarea').forEach(el => { el.style.background='#0b1220'; el.style.color='#e5e7eb'; el.style.border='1px solid #334155'; el.style.borderRadius='8px'; el.style.padding='8px 10px'; }); }
     });
   }
-
-  // Clear month input in create modal
-  paymentCreateMonthClear?.addEventListener('click', ()=>{ const overlay=document.getElementById('form-overlay'); const monthInput=overlay?.querySelector('input[type="month"][id="month"]'); if (monthInput) monthInput.value=''; });
-
   // Expose payments fetch
   window.fetchPayments = fetchPayments;
 
@@ -1244,5 +1391,272 @@ document.addEventListener('DOMContentLoaded', () => {
         }
       }
     }
+  })();
+
+  // Chips helpers
+  function createChip(label, onRemove){ const chip=document.createElement('span'); chip.style.display='inline-flex'; chip.style.alignItems='center'; chip.style.gap='6px'; chip.style.padding='4px 8px'; chip.style.borderRadius='999px'; chip.style.border='1px solid #334155'; chip.style.background='#0b1220'; chip.style.color='#e5e7eb'; chip.style.fontSize='12px'; chip.style.marginRight='6px'; const txt=document.createElement('span'); txt.textContent=label; const x=document.createElement('button'); x.textContent='✕'; x.className='btn btn-neutral'; x.style.padding='2px 6px'; x.style.fontSize='11px'; x.style.lineHeight='1'; x.addEventListener('click', (e)=>{ e.preventDefault(); onRemove && onRemove(); chip.remove(); }); chip.appendChild(txt); chip.appendChild(x); return chip; }
+
+  // Select searchable helper: inject an input to filter options
+  function makeSelectSearchable(selectEl){ if (!selectEl) return; const wrap=document.createElement('div'); wrap.style.display='inline-flex'; wrap.style.flexDirection='column'; wrap.style.gap='6px'; const search=document.createElement('input'); applyInput(search); search.placeholder='Buscar...'; search.style.maxWidth='180px'; const parent=selectEl.parentElement; if (parent){ parent.insertBefore(wrap, selectEl); wrap.appendChild(search); wrap.appendChild(selectEl); }
+    const original=[...selectEl.options].map(o=>({v:o.value,l:o.textContent}));
+    search.addEventListener('input', ()=>{ const q=search.value.toLowerCase(); selectEl.innerHTML=''; original.filter(o=>o.l.toLowerCase().includes(q) || o.v.toLowerCase().includes(q)).forEach(o=>{ const opt=document.createElement('option'); opt.value=o.v; opt.textContent=o.l; selectEl.appendChild(opt); }); });
+  }
+
+  // Enhance filters selects
+  makeSelectSearchable(tasksSortSel);
+  makeSelectSearchable(tasksStatusSel);
+  makeSelectSearchable(paymentsBankSel);
+  makeSelectSearchable(paymentsTypeSel);
+  makeSelectSearchable(paymentsStatusSel);
+
+  // Toast utility
+  function showToast(message, kind = 'neutral', timeout = 2500){
+    try {
+      const t = document.createElement('div');
+      t.className = 'toast';
+      t.style.background = kind==='success'? '#052e2b' : kind==='danger'? '#320e12' : '#0a0f1e';
+      t.style.borderColor = kind==='success'? '#10b981' : kind==='danger'? '#ef4444' : '#1f2937';
+      t.textContent = message;
+      document.body.appendChild(t);
+      setTimeout(()=>{ t.style.opacity = '0'; t.style.transition = 'opacity 200ms ease'; setTimeout(()=>{ try { document.body.removeChild(t); } catch {} }, 220); }, timeout);
+    } catch {}
+  }
+
+  // Notas: estado y elementos
+  (function(){
+    const notesSection = document.getElementById('notes-section');
+    const notesListEl2 = document.getElementById('notes');
+    const noteCreateToggle2 = document.getElementById('note-create-toggle');
+    const noteCreateForm = document.getElementById('note-create-form');
+    const notesCensorToggle2 = document.getElementById('notes-censor-toggle');
+    const toggleNotesBtn2 = document.getElementById('toggle-notes');
+    const notesPagePrev2 = document.getElementById('notes-page-prev');
+    const notesPageNext2 = document.getElementById('notes-page-next');
+    const notesPageInfo2 = document.getElementById('notes-page-info');
+    const notesPageSizeSel2 = document.getElementById('notes-page-size');
+    let allNotes2 = [];
+    let notesPage2 = 1;
+    let notesPageSize2 = 10;
+
+    /**
+     * @typedef {Object} Note
+     * @property {number} id
+     * @property {string} title
+     * @property {string} content
+     * @property {string[]} tags
+     * @property {string} createdAt
+     * @property {string} language
+     */
+
+    function loadNotes(){
+      try { const raw = localStorage.getItem('quick_notes_v1'); allNotes2 = raw ? JSON.parse(raw) : []; }
+      catch { allNotes2 = []; }
+      renderNotesPage();
+    }
+    function saveNotes(){ localStorage.setItem('quick_notes_v1', JSON.stringify(allNotes2)); }
+    function renderNotesPage(){
+      const total = allNotes2.length; const pages = Math.max(1, Math.ceil(total / notesPageSize2));
+      notesPage2 = Math.min(Math.max(1, notesPage2), pages);
+      const start = (notesPage2 - 1) * notesPageSize2;
+      const slice = allNotes2.slice(start, start + notesPageSize2);
+      renderNotes(slice);
+      if (notesPageInfo2) notesPageInfo2.textContent = `Página ${notesPage2} de ${pages} · ${total} ítems`;
+      if (notesPagePrev2) notesPagePrev2.disabled = notesPage2 <= 1;
+      if (notesPageNext2) notesPageNext2.disabled = notesPage2 >= pages;
+    }
+
+    // Utilidad para escapar HTML
+    function escapeHtml(str){
+      return String(str)
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&#039;');
+    }
+
+    // Resaltado simple de sintaxis JS/TS usando regex (sin dependencias)
+    function highlightJs(raw, langHint){
+      if (!raw) return '';
+      let code = String(raw).trim();
+      // Detectar valla ```lang\n...\n```
+      let fenceLang = null;
+      const fenceMatch = code.match(/^```(js|javascript|ts|typescript)?\n([\s\S]*?)\n```$/i);
+      if (fenceMatch) { fenceLang = fenceMatch[1] ? fenceMatch[1].toLowerCase() : null; code = fenceMatch[2]; }
+      const lang = (fenceLang || langHint || 'javascript').toLowerCase();
+
+      // Placeholder-based tokenizer to avoid re-processing inside injected HTML
+      const placeholders = [];
+      const PH = (i) => `@@TOKEN${i}@@`;
+      function protect(re, className){
+        code = code.replace(re, (m) => {
+          const idx = placeholders.push(`<span class="${className}">${escapeHtml(m)}</span>`) - 1;
+          return PH(idx);
+        });
+      }
+
+      // Order matters: comments, strings, numbers, TS types, keywords, literals, punctuation
+      // Comments
+      protect(/\/\*[\s\S]*?\*\//g, 'tok-cmt');
+      protect(/\/\/[^\n]*/g, 'tok-cmt');
+      // Strings (incl. template literals)
+      protect(/`[^`]*`/g, 'tok-str');
+      protect(/"[^"\n]*"|'[^'\n]*'/g, 'tok-str');
+      // Numbers
+      protect(/\b(0x[0-9a-fA-F]+|\d+\.\d+|\d+)\b/g, 'tok-num');
+      // TypeScript-specific (if applicable)
+      if (lang.startsWith('ts')){
+        protect(/\b(interface|type|enum|implements|private|public|protected|readonly|declare|namespace|abstract)\b/g, 'tok-kw');
+        protect(/(:\s*[A-Za-z_][A-Za-z0-9_<>?,\s]*)/g, 'tok-type');
+        protect(/\b([A-Z][A-Za-z0-9_]*)\b/g, 'tok-type');
+      } else {
+        // PascalCase identifiers (commonly classes/types)
+        protect(/\b([A-Z][A-Za-z0-9_]*)\b/g, 'tok-type');
+      }
+      // Keywords
+      protect(/\b(const|let|var|function|return|if|else|for|while|switch|case|break|continue|try|catch|finally|new|class|extends|super|import|from|export|default|async|await|typeof|instanceof|void|delete|in|of|yield)\b/g, 'tok-kw');
+      // Literals
+      protect(/\b(true|false|null|undefined|NaN|Infinity)\b/g, 'tok-lit');
+      // Punctuation
+      protect(/([{}()[\];,.])/g, 'tok-punc');
+
+      // Escape remaining text, then restore placeholders to HTML spans
+      let safe = escapeHtml(code);
+      safe = safe.replace(/@@TOKEN(\d+)@@/g, (_, n) => placeholders[Number(n)] || '');
+
+      const style = `
+        .tok-kw{ color:#93c5fd; }
+        .tok-lit{ color:#fca5a5; }
+        .tok-type{ color:#c4b5fd; }
+        .tok-punc{ color:#94a3b8; }
+        .tok-str{ color:#86efac; }
+        .tok-cmt{ color:#64748b; font-style:italic; }
+        .tok-num{ color:#fcd34d; }
+      `;
+      if (!document.getElementById('inline-code-theme')){ const styleEl = document.createElement('style'); styleEl.id = 'inline-code-theme'; styleEl.textContent = style; document.head.appendChild(styleEl); }
+      return `<pre style="background:#0b1220; color:#e5e7eb; padding:12px; border:1px solid #334155; border-radius:8px; overflow:auto;"><code>${safe}</code></pre>`;
+    }
+
+    function renderNotes(items){
+      if (!notesListEl2) return;
+      if (!items || items.length === 0){ notesListEl2.innerHTML = '<li style="color:#94a3b8;">Sin notas</li>'; return; }
+      notesListEl2.innerHTML = items.map(n => {
+        const tags = Array.isArray(n.tags) ? n.tags.join(', ') : (n.tags || '');
+        const ts = n.createdAt ? new Date(n.createdAt).toLocaleString() : '';
+        const hasFence = typeof n.content === 'string' && /^```/.test(n.content.trim());
+        const langPref = (n.language || '').toLowerCase();
+        const contentHtml = hasFence ? highlightJs(n.content, langPref) : (langPref === 'javascript' || langPref === 'typescript') ? highlightJs(n.content, langPref) : `<div class="censor-message" style="color:#cbd5e1; margin-top:4px; white-space:pre-wrap;">${escapeHtml(n.content || '')}</div>`;
+        return `<li class="card-item" data-id="${n.id}">`+
+               `<div style="display:flex; align-items:center; justify-content:space-between; gap:8px;">`+
+               `<strong class="censor-title">${escapeHtml(n.title || '')}</strong>`+
+               `<small style="color:#94a3b8;">${ts}</small>`+
+               `</div>`+
+               `${contentHtml}`+
+               `<div class="censor-tags" style="color:#94a3b8; margin-top:6px;">Tags: ${escapeHtml(tags)}</div>`+
+               `<div style="display:flex; gap:8px; margin-top:8px;">`+
+               `<button class="btn btn-primary" data-action="edit">Editar</button>`+
+               `<button class="btn btn-danger" data-action="delete">Eliminar</button>`+
+               `</div>`+
+               `</li>`;
+      }).join('');
+    }
+
+    // Handlers notas
+    noteCreateToggle2?.addEventListener('click', ()=>{
+      // Abrir modal estilado para crear nota
+      showFormModal({
+        title: 'Nueva nota',
+        fields: [
+          { id: 'title', label: 'Título', type: 'text', value: '' },
+          { id: 'content', label: 'Contenido', type: 'textarea', rows: 6, value: '' },
+          { id: 'language', label: 'Lenguaje', type: 'select', value: '', options: [
+            { label: 'Texto plano', value: '' },
+            { label: 'JavaScript', value: 'javascript' },
+            { label: 'TypeScript', value: 'typescript' }
+          ] },
+          { id: 'tags', label: 'Tags (separados por coma)', type: 'text', value: '' }
+        ],
+        onSubmit: async (values) => {
+          const title = String(values.title || '').trim();
+          const content = String(values.content || '').trim();
+          const tagsRaw = String(values.tags || '').trim();
+          const language = String(values.language || '').trim();
+          if (!title || !content) { await showMessageModal('Título y contenido son obligatorios', { title: 'Validación' }); return; }
+          const note = {
+            id: Date.now(),
+            title,
+            content,
+            language, // '' | 'javascript' | 'typescript'
+            tags: tagsRaw ? tagsRaw.split(',').map(s=>s.trim()).filter(Boolean) : [],
+            createdAt: new Date().toISOString()
+          };
+          allNotes2.unshift(note);
+          saveNotes();
+          notesPage2 = 1;
+          renderNotesPage();
+          showToast('Nota creada', 'success');
+        }
+      });
+      // Estilizar inputs del modal
+      const overlay = document.getElementById('form-overlay');
+      const bodyEl = overlay?.querySelector('#form-body');
+      if (bodyEl) { bodyEl.querySelectorAll('input, textarea, select').forEach(el => { el.style.background='#0b1220'; el.style.color='#e5e7eb'; el.style.border='1px solid #334155'; el.style.borderRadius='8px'; el.style.padding='8px 10px'; }); }
+    });
+    // El formulario embebido ya no se usa; asegurar que esté oculto si existe
+    if (noteCreateForm) noteCreateForm.style.display = 'none';
+    // Remover submit del formulario embebido para evitar duplicados
+    if (noteCreateForm) {
+      noteCreateForm.replaceWith(noteCreateForm); // no-op para conservar estructura sin listeners
+    }
+    notesListEl2?.addEventListener('click', (e)=>{
+      const btn = e.target.closest('button'); if (!btn) return; const li = btn.closest('li[data-id]'); if (!li) return; const id = Number(li.getAttribute('data-id'));
+      const action = btn.getAttribute('data-action');
+      if (action === 'delete'){
+        allNotes2 = allNotes2.filter(n => n.id !== id); saveNotes(); renderNotesPage();
+      } else if (action === 'edit') {
+        const note = allNotes2.find(n => n.id === id); if (!note) return;
+        showFormModal({
+          title: 'Editar nota',
+          fields: [
+            { id: 'title', label: 'Título', type: 'text', value: note.title || '' },
+            { id: 'content', label: 'Contenido', type: 'textarea', rows: 6, value: note.content || '' },
+            { id: 'language', label: 'Lenguaje', type: 'select', value: (note.language || ''), options: [
+              { label: 'Texto plano', value: '' },
+              { label: 'JavaScript', value: 'javascript' },
+              { label: 'TypeScript', value: 'typescript' }
+            ] },
+            { id: 'tags', label: 'Tags (separados por coma)', type: 'text', value: Array.isArray(note.tags) ? note.tags.join(', ') : (note.tags || '') }
+          ],
+          onSubmit: async (values) => {
+            const title = String(values.title || '').trim();
+            const content = String(values.content || '').trim();
+            const tagsRaw = String(values.tags || '').trim();
+            const language = String(values.language || '').trim();
+            if (!title || !content) { await showMessageModal('Título y contenido son obligatorios', { title: 'Validación' }); return; }
+            const idx = allNotes2.findIndex(n => n.id === id); if (idx === -1) return;
+            const updated = { ...allNotes2[idx], title, content, language, tags: tagsRaw ? tagsRaw.split(',').map(s=>s.trim()).filter(Boolean) : [] };
+            allNotes2[idx] = updated;
+            saveNotes();
+            renderNotesPage();
+            showToast('Nota actualizada', 'success');
+          }
+        });
+        const overlay = document.getElementById('form-overlay');
+        const bodyEl = overlay?.querySelector('#form-body');
+        if (bodyEl) { bodyEl.querySelectorAll('input, textarea, select').forEach(el => { el.style.background='#0b1220'; el.style.color='#e5e7eb'; el.style.border='1px solid #334155'; el.style.borderRadius='8px'; el.style.padding='8px 10px'; }); }
+      }
+    });
+    notesCensorToggle2?.addEventListener('click', ()=>{
+      if (!notesSection) return; const on = notesSection.classList.toggle('censored'); notesCensorToggle2.textContent = `Modo P: ${on ? 'ON' : 'OFF'}`;
+    });
+    toggleNotesBtn2?.addEventListener('click', ()=>{
+      if (!notesListEl2) return; const collapsed = notesListEl2.classList.toggle('collapsed'); toggleNotesBtn2.textContent = collapsed ? 'Expandir' : 'Contraer';
+    });
+    notesPagePrev2?.addEventListener('click', ()=>{ notesPage2 = Math.max(1, notesPage2 - 1); renderNotesPage(); });
+    notesPageNext2?.addEventListener('click', ()=>{ notesPage2 = notesPage2 + 1; renderNotesPage(); });
+    notesPageSizeSel2?.addEventListener('change', ()=>{ notesPageSize2 = parseInt(notesPageSizeSel2.value || '10', 10) || 10; notesPage2 = 1; renderNotesPage(); });
+
+    // Inicializar
+    loadNotes();
   })();
 });

@@ -66,6 +66,14 @@
       .container { width: 100%; max-width: 100%; box-sizing: border-box; padding: 16px; overflow-x: hidden; }
       /* Asegurar que los grids internos respeten el ancho */
       #week-view-container, #week-view { width: 100%; max-width: 100%; box-sizing: border-box; }
+
+      /* Evitar que todos los botones sean azules por defecto */
+      button { background: inherit; color: inherit; }
+      /* Asegurar variantes del tema */
+      .btn.btn-danger { background: #ef4444 !important; color: #fff !important; }
+      .btn.btn-success { background: #10b981 !important; color: #fff !important; }
+      .btn.btn-primary { background: #3b82f6 !important; color: #fff !important; }
+      .btn.btn-neutral { background: #6b7280 !important; color: #fff !important; }
     </style>
   </head>
   <body>
@@ -74,6 +82,7 @@
         <button class="tab-btn active" data-tab="errors">Errores</button>
         <button class="tab-btn" data-tab="tasks">Tareas</button>
         <button class="tab-btn" data-tab="payments">My Money</button>
+        <button class="tab-btn" data-tab="notes">Notas</button>
       </div>
       <div class="topbar-marquee"><span class="marquee-track"><span class="marquee-label">Próxima tarea:</span><span id="next-task-text">cargando...</span></span></div>
     </div>
@@ -90,47 +99,49 @@
       <section id="errors-section" data-section="errors">
         <section id="create">
           <h2>Crear error</h2>
-          <button id="error-create-toggle" type="button" style="background:#3b82f6; color:#fff; padding:8px 12px; border-radius:6px; border:none; cursor:pointer; margin-bottom:8px;">Crear error</button>
+          <button id="error-create-toggle" type="button" class="btn btn-primary" style="margin-bottom:8px;">Crear error</button>
           <form id="create-form" enctype="multipart/form-data" style="display:none;">
-            <label>Título<br/><input name="title" required /></label><br/>
-            <label>Mensaje<br/><textarea name="message" required></textarea></label><br/>
-            <label>Stack (opcional)<br/><textarea name="stack"></textarea></label><br/>
-            <label>Solución<br/><input name="solution" required /></label><br/>
-            <label>Tags (separados por coma)<br/><input name="tags" required /></label><br/>
-            <label>Imágenes (opcional)<br/><input id="images" name="images" type="file" accept="image/*" multiple /></label><br/>
-            <button type="submit">Crear</button>
+            <label>Título<br/><input name="title" required class="input" /></label><br/>
+            <label>Mensaje<br/><textarea name="message" required class="input"></textarea></label><br/>
+            <label>Stack (opcional)<br/><textarea name="stack" class="input"></textarea></label><br/>
+            <label>Solución<br/><input name="solution" required class="input" /></label><br/>
+            <label>Tags (separados por coma)<br/><input name="tags" required class="input" /></label><br/>
+            <label>Imágenes (opcional)<br/><input id="images" name="images" type="file" accept="image/*" multiple class="input" /></label><br/>
+            <button type="submit" class="btn btn-success">Crear</button>
           </form>
         </section>
 
         <h2 style="display:flex; align-items:center; gap:8px;">
           Lista de errores
-          <button id="toggle-errors" type="button" style="background:#374151; color:#fff; padding:6px 10px; border-radius:6px; border:none; cursor:pointer;">Contraer</button>
-          <button id="errors-censor-toggle" type="button" style="background:#6b7280; color:#fff; padding:6px 10px; border-radius:6px; border:none; cursor:pointer;">Modo P: OFF</button>
+          <button id="toggle-errors" type="button" class="btn btn-neutral">Contraer</button>
+          <button id="errors-censor-toggle" type="button" class="btn btn-neutral">Modo P: OFF</button>
         </h2>
-
-        <!-- Campo de búsqueda por tag -->
-        <div style="margin-bottom:12px;">
-          <input
-            type="text"
-            id="search"
-            placeholder="Buscar por cualquier campo"
-            style="width:100%; padding:8px; border:1px solid #334155; border-radius:4px; background:#0b1220; color:#e5e7eb;"
-          />
-        </div>
 
         <div class="filters-row" style="margin-bottom:12px;">
           <label>Orden
-            <select id="errors-sort">
+            <select id="errors-sort" class="input">
               <option value="desc">Recientes primero</option>
               <option value="asc">Antiguos primero</option>
             </select>
           </label>
           <label>Tags
-            <input type="text" id="errors-tag-filter" placeholder="ej: nestjs, prisma" />
+            <input type="text" id="errors-tag-filter" placeholder="ej: nestjs, prisma" class="input" />
           </label>
-          <button id="errors-refresh" type="button" title="Ver todos" style="background:#374151; padding:6px 8px;">↻</button>
+          <button id="errors-refresh" type="button" class="btn btn-neutral" title="Ver todos">↻</button>
         </div>
-        <ul id="errors" class="collapsible expanded"></ul>
+        <div id="errors-pagination" style="display:flex; align-items:center; gap:8px; margin:8px 0;">
+          <button id="errors-page-prev" class="btn btn-neutral" type="button">◀</button>
+          <span id="errors-page-info" style="color:#94a3b8;"></span>
+          <button id="errors-page-next" class="btn btn-neutral" type="button">▶</button>
+          <label style="margin-left:auto; display:inline-flex; align-items:center; gap:6px; color:#94a3b8;">Por página
+            <select id="errors-page-size" class="input" style="max-width:100px;">
+              <option value="5">5</option>
+              <option value="10" selected>10</option>
+              <option value="20">20</option>
+            </select>
+          </label>
+        </div>
+        <ul id="errors" class="collapsible expanded card"></ul>
       </section>
       <section id="tasks-section" data-section="tasks" class="hidden">
         <div class="subtabs">
@@ -138,7 +149,7 @@
           <button id="tasks-subtab-week" class="subtab-btn" type="button" data-subtab="week">Semana</button>
         </div>
         <h2>Crear tarea</h2>
-        <button id="task-create-toggle" type="button" style="background:#3b82f6; color:#fff; padding:8px 12px; border-radius:6px; border:none; cursor:pointer; margin-bottom:8px;">Crear tarea</button>
+        <button id="task-create-toggle" type="button" class="btn btn-primary" style="margin-bottom:8px;">Crear tarea</button>
         <form id="task-create-form" style="display:none;">
           <label>Título<br/><input name="title" required /></label><br/>
           <label>Descripción (opcional)<br/><textarea name="description"></textarea></label><br/>
@@ -162,17 +173,11 @@
         </form>
 
         <h2 style="margin-top: 16px;">Lista de tareas <button id="toggle-tasks" class="toggle-list-btn" type="button">Contraer</button> <button id="tasks-censor-toggle" type="button" title="Ocultar contenido" style="background:#6b7280; margin-left:8px;">Modo P: OFF</button> <button id="tasks-calendar-btn" type="button" title="Calendario" style="background:#374151; margin-left:8px; display:inline-flex; align-items:center; gap:6px;">📅 Calendario</button></h2>
-        <div style="margin-bottom:12px;">
-          <input
-            type="text"
-            id="task-search"
-            placeholder="Buscar tareas por cualquier campo"
-            style="width:100%; padding:8px; border:1px solid #334155; border-radius:4px; background:#0b1220; color:#e5e7eb;"
-          />
-        </div>
+        <!-- Filtros superiores removidos -->
+        <!--
         <div class="filters-row" style="margin-bottom:12px;">
           <label>Orden
-            <select id="tasks-sort">
+            <select id="tasks-sort" class="input">
               <option value="all" selected>Todos</option>
               <option value="start-desc">Inicio más cercano</option>
               <option value="start-asc">Inicio más lejano</option>
@@ -181,10 +186,10 @@
             </select>
           </label>
           <label>Duración mín (min)
-            <input type="number" id="tasks-min-duration" min="0" />
+            <input type="number" id="tasks-min-duration" min="0" class="input" />
           </label>
           <label>Estado
-            <select id="tasks-status-filter">
+            <select id="tasks-status-filter" class="input">
               <option value="">Todos</option>
               <option value="IN_PROGRESS">En proceso</option>
               <option value="PAUSED">Detenida</option>
@@ -192,13 +197,33 @@
             </select>
           </label>
           <label>Tags
-            <input type="text" id="tasks-tag-filter" placeholder="ej: work, feature" />
+            <input type="text" id="tasks-tag-filter" placeholder="ej: work, feature" class="input" />
           </label>
-          <button id="tasks-refresh" type="button" title="Ver todos" style="background:#374151; padding:6px 8px;">↻</button>
-          <!-- botones rápidos eliminados -->
+          <label>Desde
+            <input type="date" id="tasks-date-from" class="input" />
+          </label>
+          <label>Hasta
+            <input type="date" id="tasks-date-to" class="input" />
+          </label>
+          <button id="tasks-date-clear" type="button" class="btn btn-neutral" title="Limpiar rango">Limpiar rango</button>
+          <button id="tasks-refresh" type="button" class="btn btn-neutral" title="Ver todos">↻</button>
         </div>
-        <ul id="tasks" class="collapsible expanded"></ul>
-        <div id="week-view-container" class="hidden" style="margin-top:12px;">
+        <div id="task-filter-chips" style="margin:6px 0 10px;"></div>
+        -->
+        <div id="tasks-pagination" style="display:flex; align-items:center; gap:8px; margin:8px 0;">
+          <button id="tasks-page-prev" class="btn btn-neutral" type="button">◀</button>
+          <span id="tasks-page-info" style="color:#94a3b8;"></span>
+          <button id="tasks-page-next" class="btn btn-neutral" type="button">▶</button>
+          <label style="margin-left:auto; display:inline-flex; align-items:center; gap:6px; color:#94a3b8;">Por página
+            <select id="tasks-page-size" class="input" style="max-width:100px;">
+              <option value="5">5</option>
+              <option value="10" selected>10</option>
+              <option value="20">20</option>
+            </select>
+          </label>
+        </div>
+        <ul id="tasks" class="collapsible expanded card"></ul>
+        <div id="week-view-container" class="hidden card" style="margin-top:12px;">
           <h3 style="margin-bottom:8px;">Semana (Lunes a Viernes)</h3>
           <div id="week-view"></div>
         </div>
@@ -232,7 +257,7 @@
       </section>
       <section id="payments-section" data-section="payments" class="hidden">
         <h2>Crear pago</h2>
-        <button id="payment-create-toggle" type="button" style="background:#3b82f6; color:#fff; padding:8px 12px; border-radius:6px; border:none; cursor:pointer; margin-bottom:8px;">Crear pago</button>
+        <button id="payment-create-toggle" type="button" class="btn btn-primary" style="margin-bottom:8px;">Crear pago</button>
         <form id="payment-create-form" style="display:none;">
           <label>Título<br/><input name="title" required /></label><br/>
           <label>Monto<br/><input name="amount" type="number" step="0.01" required /></label><br/>
@@ -264,7 +289,9 @@
           <button type="submit">Crear pago</button>
         </form>
 
-        <h2 style="margin-top: 16px;">Lista de pagos <button id="toggle-payments" class="toggle-list-btn" type="button">Contraer</button> <button id="payments-censor-toggle" type="button" title="Ocultar contenido" style="background:#6b7280; margin-left:8px;">Modo P: OFF</button> <button id="payments-refresh" type="button" title="Ver todos" style="background:#374151; padding:6px 8px; margin-left:8px;">↻</button></h2>
+        <h2 style="margin-top: 16px;">Lista de pagos <button id="toggle-payments" class="btn btn-neutral toggle-list-btn" type="button">Contraer</button> <button id="payments-censor-toggle" type="button" class="btn btn-neutral" title="Ocultar contenido">Modo P: OFF</button> <button id="payments-refresh" type="button" class="btn btn-neutral" title="Ver todos">↻</button></h2>
+        <!-- Filtros superiores removidos -->
+        <!--
         <div class="filters-row" style="margin-bottom:12px;">
           <label>Banco
             <select id="payments-bank-filter" style="background:#0b1220; color:#e5e7eb; border:1px solid #334155; border-radius:6px; padding:6px 8px;">
@@ -292,18 +319,39 @@
           </label>
           <label>Mes
             <span style="display:flex; align-items:center; gap:6px;">
-              <input type="month" id="payments-month-filter" style="background:#0b1220; color:#e5e7eb; border:1px solid #334155; border-radius:6px; padding:6px 8px;" />
-              <button id="payments-month-btn" type="button" title="Abrir calendario" style="background:#3b82f6; color:#fff; padding:6px 8px; border:none; border-radius:6px; cursor:pointer;">📅</button>
-              <button id="payments-month-clear" type="button" title="Limpiar mes" style="background:#6b7280; color:#fff; padding:6px 8px; border:none; border-radius:6px; cursor:pointer;">Limpiar</button>
+              <input type="month" id="payments-month-filter" class="input" />
+              <button id="payments-month-btn" type="button" class="btn btn-primary" title="Abrir calendario">📅</button>
+              <button id="payments-month-clear" type="button" class="btn btn-neutral" title="Limpiar mes">Limpiar</button>
             </span>
           </label>
+          <label>Desde
+            <input type="date" id="payments-date-from" class="input" />
+          </label>
+          <label>Hasta
+            <input type="date" id="payments-date-to" class="input" />
+          </label>
+          <button id="payments-date-clear" type="button" class="btn btn-neutral" title="Limpiar rango">Limpiar rango</button>
         </div>
-        <ul id="payments" class="collapsible expanded"></ul>
+        <div id="payments-filter-chips" style="margin:6px 0 10px;"></div>
+        -->
+        <div id="payments-pagination" style="display:flex; align-items:center; gap:8px; margin:8px 0;">
+          <button id="payments-page-prev" class="btn btn-neutral" type="button">◀</button>
+          <span id="payments-page-info" style="color:#94a3b8;"></span>
+          <button id="payments-page-next" class="btn btn-neutral" type="button">▶</button>
+          <label style="margin-left:auto; display:inline-flex; align-items:center; gap:6px; color:#94a3b8;">Por página
+            <select id="payments-page-size" class="input" style="max-width:100px;">
+              <option value="5">5</option>
+              <option value="10" selected>10</option>
+              <option value="20">20</option>
+            </select>
+          </label>
+        </div>
+        <ul id="payments" class="collapsible expanded card"></ul>
 
         <!-- Charts containers -->
-        <div class="payments-summary-box">
+        <div class="payments-summary-box card">
           <div class="payments-summary">
-            <div class="canvas-wrap">
+            <div class="canvas-wrap card">
               <span class="canvas-title">Gastos vs Ingresos</span>
               <canvas id="payments-pie" width="720" height="260"></canvas>
             </div>
@@ -316,6 +364,31 @@
             </div>
           </div>
         </div>
+      </section>
+      <section id="notes-section" data-section="notes" class="hidden">
+        <h2>Crear nota</h2>
+        <button id="note-create-toggle" type="button" class="btn btn-primary" style="margin-bottom:8px;">Crear nota</button>
+        <form id="note-create-form" style="display:none;">
+          <label>Título<br/><input name="title" required /></label><br/>
+          <label>Contenido<br/><textarea name="content" required></textarea></label><br/>
+          <label>Tags (separados por coma)<br/><input name="tags" /></label><br/>
+          <button type="submit">Crear nota</button>
+        </form>
+
+        <h2 style="margin-top: 16px;">Notas <button id="toggle-notes" class="btn btn-neutral toggle-list-btn" type="button">Contraer</button> <button id="notes-censor-toggle" type="button" class="btn btn-neutral" title="Ocultar contenido">Modo P: OFF</button></h2>
+        <div id="notes-pagination" style="display:flex; align-items:center; gap:8px; margin:8px 0;">
+          <button id="notes-page-prev" class="btn btn-neutral" type="button">◀</button>
+          <span id="notes-page-info" style="color:#94a3b8;"></span>
+          <button id="notes-page-next" class="btn btn-neutral" type="button">▶</button>
+          <label style="margin-left:auto; display:inline-flex; align-items:center; gap:6px; color:#94a3b8;">Por página
+            <select id="notes-page-size" class="input" style="max-width:100px;">
+              <option value="5">5</option>
+              <option value="10" selected>10</option>
+              <option value="20">20</option>
+            </select>
+          </label>
+        </div>
+        <ul id="notes" class="collapsible expanded card"></ul>
       </section>
     </div>
     <script src="/main.js"></script>

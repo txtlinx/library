@@ -6,6 +6,7 @@ import { AppService } from './app.service';
 import { ErrorsModule } from './errors/errors.module';
 import { TasksModule } from './tasks/tasks.module';
 import { PaymentsModule } from './payments/payments.module';
+import { NotesModule } from './notes/notes.module';
 
 @Module({
   imports: [
@@ -20,6 +21,7 @@ import { PaymentsModule } from './payments/payments.module';
     ErrorsModule,
     TasksModule,
     PaymentsModule,
+    NotesModule,
   ],
   controllers: [AppController],
   providers: [AppService],
