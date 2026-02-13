@@ -3,6 +3,13 @@ document.addEventListener('DOMContentLoaded', () => {
   const ipEl = document.getElementById('ip');
   const timeLocalEl = document.getElementById('time-local');
   const timeSantiagoEl = document.getElementById('time-santiago');
+  const usdClpEl = document.getElementById('usd-clp');
+  const usdBrlEl = document.getElementById('usd-brl');
+  const fxAmountInput = document.getElementById('fx-amount-input');
+  const fxBaseCurrency = document.getElementById('fx-base-currency');
+  const fxOutClp = document.getElementById('fx-out-clp');
+  const fxOutBrl = document.getElementById('fx-out-brl');
+  const fxOutUsd = document.getElementById('fx-out-usd');
   const nextTaskTextEl = document.getElementById('next-task-text');
   const tasksListEl = document.getElementById('tasks');
   const tasksRefreshBtn = document.getElementById('tasks-refresh');
@@ -15,6 +22,10 @@ document.addEventListener('DOMContentLoaded', () => {
   const weekViewEl = document.getElementById('week-view');
   const tasksSubtabListBtn = document.getElementById('tasks-subtab-list');
   const tasksSubtabWeekBtn = document.getElementById('tasks-subtab-week');
+  const weekCarouselPrevBtn = document.getElementById('week-carousel-prev');
+  const weekCarouselNextBtn = document.getElementById('week-carousel-next');
+  const weekCarouselRangeEl = document.getElementById('week-carousel-range');
+  const tasksStartAlertEl = document.getElementById('tasks-start-alert');
   const tasksCalendarBtn = document.getElementById('tasks-calendar-btn');
   const calModal = document.getElementById('tasks-calendar-modal');
   const calPrevBtn = document.getElementById('cal-prev');
@@ -23,7 +34,12 @@ document.addEventListener('DOMContentLoaded', () => {
   const calHeader = document.getElementById('cal-header');
   const calGrid = document.getElementById('cal-grid');
   const paymentsListEl = document.getElementById('payments');
+  const paymentsBanksListEl = document.getElementById('payments-banks-list');
   const paymentCreateToggle = document.getElementById('payment-create-toggle');
+  const paymentsSubtabListBtn = document.getElementById('payments-subtab-list');
+  const paymentsSubtabBanksBtn = document.getElementById('payments-subtab-banks');
+  const paymentsSubtabListView = document.getElementById('payments-subtab-list-view');
+  const paymentsSubtabBanksView = document.getElementById('payments-subtab-banks-view');
   const paymentsRefreshBtn = document.getElementById('payments-refresh');
   const paymentsBankSel = document.getElementById('payments-bank-filter');
   const paymentsTypeSel = document.getElementById('payments-type-filter');
@@ -71,10 +87,13 @@ document.addEventListener('DOMContentLoaded', () => {
 
   let allTasks = [];
   let filteredTasks = [];
+  let weekCarouselOffsetDays = 0;
   let calYear, calMonth; // 0-based month
   let allPayments = [];
+  let bankProfilesByBank = {};
   let filteredPayments = [];
   let paymentsChart = null;
+  let usdRates = { CLP: null, BRL: null };
 
   let tasksPage = 1;
   let tasksPageSize = 10;
@@ -101,10 +120,120 @@ document.addEventListener('DOMContentLoaded', () => {
     'Gasto fijo': { bg:'#7c2d12', fg:'#fde68a' },
     'Ingreso': { bg:'#065f46', fg:'#d1fae5' }
   };
+  const BANKS_FIXED = ['FALABELLA', 'ESTADO', 'CHILE', 'SANTANDER'];
 
   function applyBtn(el, variant='primary'){ if (!el) return; el.classList.add('btn'); if (variant) el.classList.add('btn-'+variant); }
   function applyInput(el){ if (!el) return; el.classList.add('input'); }
   function applyCard(el){ if (!el) return; el.classList.add('card'); }
+  function setupKeyboardForButtons() {
+    const shortcutPool = '1234567890ABCDEFGHIJKLMNOPQRSTUVWXYZ'.split('');
+    const keyToButton = new Map();
+    const processed = new WeakSet();
+    let nextShortcutIndex = 0;
+
+    function isTextEntry(el) {
+      if (!el) return false;
+      const tag = String(el.tagName || '').toLowerCase();
+      return tag === 'input' || tag === 'textarea' || tag === 'select' || el.isContentEditable;
+    }
+
+    function bindButtonShortcut(btn) {
+      if (!btn || processed.has(btn)) return;
+      processed.add(btn);
+
+      const key = shortcutPool[nextShortcutIndex] || null;
+      const directHint = key ? `Alt+Shift+${key}` : null;
+      if (key && !btn.dataset.shortcutKey) {
+        btn.dataset.shortcutKey = key;
+        nextShortcutIndex += 1;
+      }
+      if (directHint && btn.dataset.shortcutKey) {
+        keyToButton.set(btn.dataset.shortcutKey, btn);
+        btn.setAttribute('aria-keyshortcuts', directHint);
+      }
+
+      const currentTitle = btn.getAttribute('title') || '';
+      if (!btn.dataset.kbdHintBound) {
+        const keyboardHint = directHint
+          ? `Teclado: ${directHint} o Tab + Enter/Espacio`
+          : 'Teclado: Tab + Enter/Espacio';
+        btn.setAttribute('title', currentTitle ? `${currentTitle} | ${keyboardHint}` : keyboardHint);
+        btn.dataset.kbdHintBound = '1';
+      }
+    }
+
+    function bindAllButtons() {
+      document.querySelectorAll('button').forEach((btn) => bindButtonShortcut(btn));
+    }
+
+    document.addEventListener('keydown', (e) => {
+      if (isTextEntry(document.activeElement)) return;
+      if (!e.altKey || !e.shiftKey || e.ctrlKey || e.metaKey) return;
+      const key = String(e.key || '').toUpperCase();
+      if (!key) return;
+      const btn = keyToButton.get(key);
+      if (!btn || btn.disabled || !btn.isConnected) return;
+      e.preventDefault();
+      btn.focus();
+      btn.click();
+    });
+
+    bindAllButtons();
+    const observer = new MutationObserver(() => bindAllButtons());
+    observer.observe(document.body, { childList: true, subtree: true });
+  }
+  const formatCLP = (v) => new Intl.NumberFormat('es-CL', { style:'currency', currency:'CLP', maximumFractionDigits:0 }).format(v || 0);
+  function normalizeBankProfile(raw = {}){
+    return {
+      cupoTotal: Number(raw.cupoTotal ?? raw.totalLimit ?? 0) || 0,
+      totalDebt: Number(raw.totalDebt ?? 0) || 0,
+      debtCreditCard: Number(raw.debtCreditCard ?? 0) || 0,
+      debtCreditLine: Number(raw.debtCreditLine ?? 0) || 0,
+      debtAdvance: Number(raw.debtAdvance ?? 0) || 0,
+      debtConsumerCredit: Number(raw.debtConsumerCredit ?? 0) || 0,
+      totalInstallments: Math.max(0, Math.trunc(Number(raw.totalInstallments ?? 0) || 0)),
+      paidInstallments: Math.max(0, Math.trunc(Number(raw.paidInstallments ?? 0) || 0)),
+      paymentStatus: String(raw.paymentStatus || '').trim(),
+      paymentDate: String(raw.paymentDate || '').trim(),
+      statementDate: String(raw.statementDate || '').trim(),
+    };
+  }
+  function normalizeBankProfilesMap(source = {}){
+    const out = {};
+    BANKS_FIXED.forEach((bank) => { out[bank] = normalizeBankProfile(source[bank] || {}); });
+    return out;
+  }
+  async function fetchBankProfiles({ silent = true } = {}){
+    try {
+      const res = await fetch('/bank-accounts');
+      if (!res.ok) throw new Error('Error al obtener bancos');
+      const rows = await res.json();
+      const map = {};
+      (Array.isArray(rows) ? rows : []).forEach((row) => {
+        const bank = String(row.bank || '').toUpperCase();
+        if (!BANKS_FIXED.includes(bank)) return;
+        map[bank] = normalizeBankProfile(row);
+      });
+      bankProfilesByBank = normalizeBankProfilesMap(map);
+      renderBanksOverview(allPayments);
+    } catch (err) {
+      console.error(err);
+      bankProfilesByBank = normalizeBankProfilesMap(bankProfilesByBank);
+      renderBanksOverview(allPayments);
+      if (!silent) await showMessageModal('No se pudieron cargar los bancos', { title: 'Error' });
+    }
+  }
+  function fmtDateEs(value){
+    const date = value ? new Date(value + 'T00:00:00') : null;
+    if (!date || Number.isNaN(date.getTime())) return 'No definida';
+    return new Intl.DateTimeFormat('es-CL', { day:'2-digit', month:'2-digit', year:'numeric' }).format(date);
+  }
+  function deriveBankStatus({ debtPending, paidAmount, bankProfileStatus }){
+    if (bankProfileStatus) return bankProfileStatus;
+    if (debtPending <= 0) return 'PAGADO';
+    if (paidAmount > 0) return 'PAGANDO';
+    return 'PENDIENTE';
+  }
 
   async function fetchIP() {
     if (!ipEl) return;
@@ -118,6 +247,59 @@ document.addEventListener('DOMContentLoaded', () => {
       ipEl.textContent = 'no disponible';
     }
   }
+  async function fetchUsdRates() {
+    if (!usdClpEl && !usdBrlEl) return;
+    try {
+      const res = await fetch('https://open.er-api.com/v6/latest/USD');
+      if (!res.ok) throw new Error('no response');
+      const data = await res.json();
+      const rates = data?.rates || {};
+      const clp = Number(rates.CLP);
+      const brl = Number(rates.BRL);
+      usdRates = {
+        CLP: Number.isFinite(clp) ? clp : null,
+        BRL: Number.isFinite(brl) ? brl : null,
+      };
+      const clpTxt = Number.isFinite(clp)
+        ? new Intl.NumberFormat('es-CL', { style: 'currency', currency: 'CLP', maximumFractionDigits: 2 }).format(clp)
+        : 'no disponible';
+      const brlTxt = Number.isFinite(brl)
+        ? new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL', maximumFractionDigits: 2 }).format(brl)
+        : 'no disponible';
+      if (usdClpEl) usdClpEl.textContent = clpTxt;
+      if (usdBrlEl) usdBrlEl.textContent = brlTxt;
+      renderFxConverter();
+    } catch (err) {
+      console.error('fetchUsdRates error', err);
+      if (usdClpEl) usdClpEl.textContent = 'no disponible';
+      if (usdBrlEl) usdBrlEl.textContent = 'no disponible';
+      usdRates = { CLP: null, BRL: null };
+      renderFxConverter();
+    }
+  }
+  function renderFxConverter() {
+    if (!fxOutClp || !fxOutBrl || !fxOutUsd) return;
+    const rawAmount = Number(fxAmountInput?.value || 0);
+    const base = String(fxBaseCurrency?.value || 'USD').toUpperCase();
+    const clpRate = Number(usdRates.CLP || 0);
+    const brlRate = Number(usdRates.BRL || 0);
+    if (!Number.isFinite(rawAmount) || rawAmount < 0 || !clpRate || !brlRate) {
+      fxOutClp.textContent = '--';
+      fxOutBrl.textContent = '--';
+      fxOutUsd.textContent = '--';
+      return;
+    }
+
+    let usdAmount = rawAmount;
+    if (base === 'CLP') usdAmount = rawAmount / clpRate;
+    else if (base === 'BRL') usdAmount = rawAmount / brlRate;
+
+    const clpAmount = usdAmount * clpRate;
+    const brlAmount = usdAmount * brlRate;
+    fxOutClp.textContent = new Intl.NumberFormat('es-CL', { style: 'currency', currency: 'CLP', maximumFractionDigits: 2 }).format(clpAmount);
+    fxOutBrl.textContent = new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL', maximumFractionDigits: 2 }).format(brlAmount);
+    fxOutUsd.textContent = new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD', maximumFractionDigits: 2 }).format(usdAmount);
+  }
   function updateClocks() {
     const now = new Date();
     const opts = { weekday: 'long', day: '2-digit', month: 'long', hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false };
@@ -130,7 +312,14 @@ document.addEventListener('DOMContentLoaded', () => {
       catch { try { timeSantiagoEl.textContent = now.toLocaleString('es-CL'); } catch { timeSantiagoEl.textContent = '--:--:--'; } }
     }
   }
-  fetchIP(); updateClocks(); setInterval(updateClocks, 1000);
+  fetchIP();
+  fetchUsdRates();
+  updateClocks();
+  setInterval(updateClocks, 1000);
+  setInterval(fetchUsdRates, 10 * 60 * 1000);
+  setupKeyboardForButtons();
+  fxAmountInput?.addEventListener('input', renderFxConverter);
+  fxBaseCurrency?.addEventListener('change', renderFxConverter);
 
   async function fetchErrors() {
     try { const res = await fetch('/errors'); if (!res.ok) throw new Error('Error al obtener errores'); allErrors = await res.json(); applyErrorsFilters(); }
@@ -399,7 +588,7 @@ document.addEventListener('DOMContentLoaded', () => {
       // min duration
       if (minDur > 0 && (t.durationMinutes || 0) < minDur) return false;
       // status
-      if (status && t.status !== status) return false;
+      if (status && getEffectiveTaskStatus(t) !== status) return false;
       // tag filter: match any
       if (tagFilter) {
         const tags = Array.isArray(t.tags) ? t.tags.map(x => x.toLowerCase()) : String(t.tags || '').toLowerCase().split(',').map(s=>s.trim()).filter(Boolean);
@@ -420,6 +609,7 @@ document.addEventListener('DOMContentLoaded', () => {
     tasksPage = 1;
     renderTasksPage();
     updateNextTaskMarquee(filteredTasks);
+    renderTasksStartAlert(filteredTasks);
     renderWeekView(filteredTasks);
     renderTaskFilterChips();
   }
@@ -528,13 +718,15 @@ document.addEventListener('DOMContentLoaded', () => {
   const STATUS_COLORS = {
     IN_PROGRESS: { bg: '#0ea5e9', text: '#f0f9ff' }, // sky-500
     PAUSED: { bg: '#f59e0b', text: '#111827' },      // amber-500
+    STOPPED: { bg: '#7c2d12', text: '#fde68a' },     // amber-900
     COMPLETED: { bg: '#10b981', text: '#052e2b' }    // emerald-500
   };
   function createStatusBadge(status){
     const s = String(status || 'IN_PROGRESS');
     const cfg = STATUS_COLORS[s] || STATUS_COLORS.IN_PROGRESS;
     const el = document.createElement('span');
-    el.textContent = s.replace('_',' ');
+    const labelMap = { IN_PROGRESS: 'EN PROGRESO', PAUSED: 'PAUSADA', STOPPED: 'DETENIDA', COMPLETED: 'COMPLETADA' };
+    el.textContent = labelMap[s] || s.replace('_',' ');
     el.style.display = 'inline-block'; el.style.fontSize='12px'; el.style.fontWeight='700';
     el.style.background = cfg.bg; el.style.color = cfg.text; el.style.padding='2px 8px'; el.style.borderRadius='999px'; el.style.marginLeft='8px';
     el.setAttribute('title','Estado');
@@ -545,7 +737,7 @@ document.addEventListener('DOMContentLoaded', () => {
     const start = new Date(t.startAt).getTime();
     const end = start + t.durationMinutes * 60_000;
     const now = Date.now();
-    return t.status === 'IN_PROGRESS' && now >= start && now < end;
+    return getEffectiveTaskStatus(t) === 'IN_PROGRESS' && now >= start && now < end;
   }
   function remainingMs(t){
     const start = new Date(t.startAt).getTime();
@@ -578,15 +770,42 @@ document.addEventListener('DOMContentLoaded', () => {
       if (!isTaskActiveNow(task)) { container.remove(); taskTimers.delete(id); continue; }
       el.textContent = fmtHMS(remainingMs(task));
     }
+    try { renderTasksStartAlert(filteredTasks); } catch {}
   }, 1000);
 
   // Tiempo y alertas
   function msToStart(t){ if (!t?.startAt) return Infinity; return new Date(t.startAt).getTime() - Date.now(); }
   function msToEnd(t){ if (!t?.startAt || !t?.durationMinutes) return Infinity; const end = new Date(t.startAt).getTime() + t.durationMinutes*60_000; return end - Date.now(); }
   function canStartEarly(t){ const ms = msToStart(t); return ms <= 60*60_000; } // 1 hora antes
-  function needsStartAlert(t){ const ms = msToStart(t); return ms <= 30*60_000 && ms > 0; } // 30 min antes
+  function needsStartAlert(t){ const ms = msToStart(t); return ms <= 3*60*60_000 && ms > 0; } // 3 horas antes
   function needsFinishAlert(t){ const ms = msToEnd(t); return ms <= 15*60_000 && ms > 0; } // 15 min antes
   function makeAlertBadge(kind){ const el=document.createElement('span'); el.style.display='inline-block'; el.style.padding='2px 8px'; el.style.borderRadius='999px'; el.style.fontSize='12px'; el.style.fontWeight='800'; el.style.marginLeft='8px'; if (kind==='start'){ el.textContent='⏳ inicia pronto'; el.style.background='#f59e0b'; el.style.color='#111827'; } else { el.textContent='⌛ termina pronto'; el.style.background='#ef4444'; el.style.color='#fff'; } return el; }
+  function getEffectiveTaskStatus(t){
+    const raw = String(t?.status || 'IN_PROGRESS');
+    if (raw === 'COMPLETED' || raw === 'STOPPED' || raw === 'IN_PROGRESS') return raw;
+    const startMs = t?.startAt ? new Date(t.startAt).getTime() : 0;
+    if (raw === 'PAUSED' && startMs && Date.now() >= startMs) return 'STOPPED';
+    return raw;
+  }
+  function fmtCountdown(ms){ const safe = Math.max(0, Math.floor(ms/1000)); const h = Math.floor(safe/3600); const m = Math.floor((safe%3600)/60); const s = safe%60; return `${String(h).padStart(2,'0')}:${String(m).padStart(2,'0')}:${String(s).padStart(2,'0')}`; }
+  function renderTasksStartAlert(tasks){
+    if (!tasksStartAlertEl) return;
+    const arr = Array.isArray(tasks) ? tasks : [];
+    const now = Date.now();
+    const next = arr
+      .filter(t => t && t.startAt)
+      .filter(t => {
+        const st = String(t.status || '');
+        if (st === 'COMPLETED' || st === 'STOPPED') return false;
+        const ms = new Date(t.startAt).getTime() - now;
+        return ms > 0 && ms <= 3 * 60 * 60 * 1000;
+      })
+      .sort((a,b) => new Date(a.startAt).getTime() - new Date(b.startAt).getTime())[0];
+    if (!next) { tasksStartAlertEl.style.display = 'none'; tasksStartAlertEl.textContent = ''; return; }
+    const msLeft = new Date(next.startAt).getTime() - now;
+    tasksStartAlertEl.style.display = 'block';
+    tasksStartAlertEl.innerHTML = `La tarea <span class="censor-title">${escapeHtml(next.title || 'sin título')}</span> va a iniciar. Cronómetro a iniciar: <span class="censor-message">${fmtCountdown(msLeft)}</span>`;
+  }
 
   // Render de tareas
   function renderTasks(tasks) {
@@ -602,7 +821,7 @@ document.addEventListener('DOMContentLoaded', () => {
       const startTxt = formatDateTime(t.startAt);
       const tagsTxt = Array.isArray(t.tags) ? t.tags.map(escapeHtml).join(', ') : escapeHtml(t.tags || '');
       const durTxt = t.durationMinutes ? String(t.durationMinutes) + ' min' : '-';
-      const statusTxt = String(t.status || 'IN_PROGRESS');
+      const statusTxt = getEffectiveTaskStatus(t);
 
       const top = document.createElement('div');
       top.innerHTML = `<strong class="censor-title">${escapeHtml(t.title)}</strong>`;
@@ -631,29 +850,24 @@ document.addEventListener('DOMContentLoaded', () => {
       const mkBtn = (label, bg, variant='neutral') => { const b=document.createElement('button'); b.textContent=label; applyBtn(b, variant); b.style.background=bg; return b; };
       const btnEdit = mkBtn('✏️ Editar', '#3b82f6', 'primary');
       const btnPause = mkBtn('Pausar', '#6b7280', 'neutral');
-      const btnStart = mkBtn('Reanudar', '#06b6d4', 'primary');
       const btnComplete = mkBtn('Completar', '#10b981', 'success');
+      const btnReplicate = mkBtn('Agregar replicar tarea', '#6366f1', 'primary');
       const btnDelete = mkBtn('Eliminar', '#ef4444', 'danger');
       btnEdit.addEventListener('click', () => openTaskEditModal(t));
       btnPause.addEventListener('click', () => updateTaskStatus(t.id, 'pause'));
-      btnStart.addEventListener('click', () => updateTaskStatus(t.id, 'start'));
       btnComplete.addEventListener('click', () => updateTaskStatus(t.id, 'complete'));
+      btnReplicate.addEventListener('click', () => replicateTask(t, statusTxt));
       btnDelete.addEventListener('click', async () => { const ok = await showConfirm('¿Eliminar esta tarea?'); if (!ok) return; try { const res = await fetch('/tasks/' + t.id, { method: 'DELETE' }); if (!res.ok) throw new Error(await res.text()); showToast('Tarea eliminada', 'success'); await fetchTasks(true); } catch (err) { console.error(err); await showMessageModal('No se pudo eliminar la tarea', { title: 'Error' }); } });
-      actions.appendChild(btnEdit); actions.appendChild(btnPause); actions.appendChild(btnStart); actions.appendChild(btnComplete); actions.appendChild(btnDelete);
+      actions.appendChild(btnEdit); actions.appendChild(btnPause); actions.appendChild(btnComplete); actions.appendChild(btnReplicate); actions.appendChild(btnDelete);
 
-      // Lógica de habilitación: Start y Pause
+      // Lógica de habilitación: Pause
       const activeWindow = isTaskActiveNow(t);
-      const isInProgress = t.status === 'IN_PROGRESS';
+      const isInProgress = statusTxt === 'IN_PROGRESS';
 
-      // Si está activa con cronómetro, ocultar ambos: Pausar y Reanudar
+      // Si está activa con cronómetro, ocultar Pausar
       if (activeWindow) {
         btnPause.style.display = 'none'; btnPause.disabled = true; btnPause.title = 'Cronómetro activo';
-        btnStart.style.display = 'none'; btnStart.disabled = true; btnStart.title = 'Cronómetro activo';
       } else {
-        // Start: permitido si está PAUSED o IN_PROGRESS, o hasta 1h antes de iniciar y no COMPLETED
-        if (canStartEarly(t) && t.status !== 'COMPLETED') { btnStart.disabled = false; btnStart.style.opacity='1'; btnStart.style.display='inline-block'; btnStart.title='Puedes iniciar/reanudar hasta 1 hora antes'; }
-        else if (t.status === 'PAUSED' || t.status === 'IN_PROGRESS') { btnStart.disabled = false; btnStart.style.opacity='1'; btnStart.style.display='inline-block'; }
-        else { btnStart.disabled = true; btnStart.style.opacity='0.6'; btnStart.style.display='inline-block'; btnStart.title='No disponible'; }
         // Pause: solo visible/habilitado cuando está en progreso pero fuera de ventana activa (no debería, pero mantenemos oculto)
         if (isInProgress) { btnPause.disabled = false; btnPause.style.opacity='1'; btnPause.style.display='inline-block'; btnPause.title='Pausar'; }
         else { btnPause.disabled = true; btnPause.style.opacity='0.4'; btnPause.style.display='none'; btnPause.title='Disponible solo en progreso'; }
@@ -674,9 +888,10 @@ document.addEventListener('DOMContentLoaded', () => {
         { id: 'durationMinutes', label: 'Duración (minutos)', type: 'number', value: t.durationMinutes != null ? String(t.durationMinutes) : '' },
         { id: 'tags', label: 'Tags (separados por coma)', type: 'text', value: Array.isArray(t.tags)? t.tags.join(', ') : (t.tags||'') },
         // Estado como combobox
-        { id: 'status', label: 'Estado', type: 'select', value: t.status || 'IN_PROGRESS', options: [
+        { id: 'status', label: 'Estado', type: 'select', value: getEffectiveTaskStatus(t) || 'IN_PROGRESS', options: [
           { label: 'En progreso', value: 'IN_PROGRESS' },
           { label: 'Pausada', value: 'PAUSED' },
+          { label: 'Detenido', value: 'STOPPED' },
           { label: 'Completada', value: 'COMPLETED' }
         ] }
       ],
@@ -707,6 +922,28 @@ document.addEventListener('DOMContentLoaded', () => {
   }
 
   function formatDateTime(iso){ if (!iso) return ''; try { const d=new Date(iso); return new Intl.DateTimeFormat('es-CL',{ weekday:'short', day:'2-digit', month:'short', hour:'2-digit', minute:'2-digit', hour12:false }).format(d); } catch { return String(iso); } }
+  function localDateKey(dtLike){
+    const d = new Date(dtLike);
+    const y = d.getFullYear();
+    const m = String(d.getMonth() + 1).padStart(2, '0');
+    const day = String(d.getDate()).padStart(2, '0');
+    return `${y}-${m}-${day}`;
+  }
+  function findTaskOverlap(startAtIso, durationMinutes, excludeTaskId){
+    if (!startAtIso) return null;
+    const start = new Date(startAtIso).getTime();
+    const dur = Number(durationMinutes || 0);
+    if (!start || Number.isNaN(start) || !dur || dur <= 0) return null;
+    const end = start + dur * 60_000;
+    const source = Array.isArray(allTasks) ? allTasks : [];
+    return source.find((t) => {
+      if (!t || !t.startAt || !t.durationMinutes) return false;
+      if (excludeTaskId != null && Number(t.id) === Number(excludeTaskId)) return false;
+      const tStart = new Date(t.startAt).getTime();
+      const tEnd = tStart + Number(t.durationMinutes || 0) * 60_000;
+      return start < tEnd && end > tStart;
+    }) || null;
+  }
 
   async function updateTaskStatus(id, action){
     try {
@@ -726,6 +963,38 @@ document.addEventListener('DOMContentLoaded', () => {
     } catch (err) {
       console.error(err);
       await showMessageModal('No se pudo actualizar el estado', { title: 'Error' });
+    }
+  }
+
+  async function replicateTask(task, resolvedStatus){
+    try {
+      const nowSafeIso = new Date(Date.now() + 2 * 60 * 1000).toISOString();
+      const originalStart = task?.startAt ? new Date(task.startAt).toISOString() : nowSafeIso;
+      const shouldUseNow = resolvedStatus === 'STOPPED' || (task?.startAt && new Date(task.startAt).getTime() < Date.now());
+      const payload = {
+        title: task?.title ? `${task.title} (copia)` : 'Tarea replicada',
+        description: task?.description || undefined,
+        startAt: shouldUseNow ? nowSafeIso : originalStart,
+        durationMinutes: Number(task?.durationMinutes || 30) || 30,
+        tags: Array.isArray(task?.tags) ? task.tags : String(task?.tags || '').split(',').map(s=>s.trim()).filter(Boolean),
+        status: shouldUseNow ? 'IN_PROGRESS' : (task?.status || 'PAUSED'),
+      };
+      let res = await fetch('/tasks', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
+      if (!res.ok) {
+        const txt = await res.text();
+        if (txt.includes('startAt no puede estar en el pasado')) {
+          payload.startAt = new Date(Date.now() + 5 * 60 * 1000).toISOString();
+          res = await fetch('/tasks', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
+          if (!res.ok) throw new Error(await res.text());
+        } else {
+          throw new Error(txt);
+        }
+      }
+      showToast('Tarea replicada', 'success');
+      await fetchTasks(true);
+    } catch (err) {
+      console.error(err);
+      await showMessageModal('No se pudo replicar la tarea', { title: 'Error' });
     }
   }
 
@@ -765,18 +1034,35 @@ document.addEventListener('DOMContentLoaded', () => {
     weekViewContainer.style.boxSizing = 'border-box';
 
     weekViewEl.innerHTML = '';
-    const days = ['Lunes','Martes','Miércoles','Jueves','Viernes'];
-    const groups = [[],[],[],[],[]];
-    tasks.forEach(t => {
+    const base = new Date();
+    base.setHours(0,0,0,0);
+    base.setDate(base.getDate() + weekCarouselOffsetDays);
+    const startDate = new Date(base); startDate.setDate(base.getDate() - 2);
+    const endDate = new Date(base); endDate.setDate(base.getDate() + 3);
+    const days = [];
+    const groups = [];
+    for (let i = 0; i < 6; i++) {
+      const d = new Date(startDate);
+      d.setDate(startDate.getDate() + i);
+      days.push(d);
+      groups.push([]);
+    }
+    const idxByDate = new Map(days.map((d, idx) => [localDateKey(d), idx]));
+    (tasks || []).forEach(t => {
       if (!t.startAt) return;
-      const d = new Date(t.startAt);
-      const day = (d.getDay() + 6) % 7;
-      if (day >= 0 && day <= 4) groups[day].push(t);
+      const key = localDateKey(t.startAt);
+      const idx = idxByDate.get(key);
+      if (idx == null) return;
+      groups[idx].push(t);
     });
+    if (weekCarouselRangeEl) {
+      const fmt = new Intl.DateTimeFormat('es-CL', { day:'2-digit', month:'short' });
+      weekCarouselRangeEl.textContent = `${fmt.format(startDate)} - ${fmt.format(endDate)}`;
+    }
     const wrap = document.createElement('div');
     wrap.style.display = 'grid';
-    // columnas más anchas para que el texto no se corte
-    wrap.style.gridTemplateColumns = 'repeat(5, minmax(240px, 1fr))';
+    // Responsive: ajusta columnas según ancho disponible para evitar corte
+    wrap.style.gridTemplateColumns = 'repeat(auto-fit, minmax(220px, 1fr))';
     wrap.style.gap = '16px';
     wrap.style.width = '100%';
     wrap.style.boxSizing = 'border-box';
@@ -786,16 +1072,26 @@ document.addEventListener('DOMContentLoaded', () => {
     groups.forEach((items, i) => {
       const col = document.createElement('div');
       col.style.border = '1px solid #1f2937'; col.style.borderRadius = '12px'; col.style.padding = '12px'; col.style.background = '#0b1220'; col.style.minHeight='220px'; col.style.boxShadow='0 4px 14px rgba(0,0,0,0.25)';
-      const h = document.createElement('div'); h.textContent = days[i]; h.style.fontWeight = '800'; h.style.margin='2px 0 10px'; h.style.color = '#e5e7eb'; h.style.position='sticky'; h.style.top='0'; h.style.background='#0b1220'; h.style.padding='6px 4px';
+      const dayDate = days[i];
+      const dayName = capitalize(new Intl.DateTimeFormat('es-CL', { weekday:'short' }).format(dayDate).replace('.', ''));
+      const dayNum = new Intl.DateTimeFormat('es-CL', { day:'2-digit', month:'2-digit' }).format(dayDate);
+      const h = document.createElement('div'); h.textContent = `${dayName} ${dayNum}`; h.style.fontWeight = '800'; h.style.margin='2px 0 10px'; h.style.color = '#e5e7eb'; h.style.position='sticky'; h.style.top='0'; h.style.background='#0b1220'; h.style.padding='6px 4px';
       col.appendChild(h);
       const sorted = items.sort((a,b)=>new Date(a.startAt) - new Date(b.startAt));
+      if (!sorted.length) {
+        const empty = document.createElement('div');
+        empty.textContent = 'Sin tareas';
+        empty.style.color = '#64748b';
+        empty.style.fontSize = '13px';
+        col.appendChild(empty);
+      }
       sorted.forEach(t => {
         const card = document.createElement('div');
         card.style.border='1px solid #1f2937'; card.style.borderRadius='10px'; card.style.padding='10px'; card.style.marginBottom='10px'; card.style.background='linear-gradient(180deg,#0b1220,#0a1222)';
         card.style.wordWrap = 'break-word'; card.style.whiteSpace = 'normal';
         const head = document.createElement('div'); head.style.display='flex'; head.style.justifyContent='space-between'; head.style.alignItems='flex-start'; head.style.gap='8px';
         const title = document.createElement('div'); title.innerHTML = `<strong class="censor-title">${escapeHtml(t.title)}</strong>`; title.style.wordBreak='break-word';
-        const badge = createStatusBadge(t.status);
+        const badge = createStatusBadge(getEffectiveTaskStatus(t));
         head.appendChild(title); head.appendChild(badge); card.appendChild(head);
         const info = document.createElement('div'); info.style.color='#94a3b8'; info.style.fontSize='12px'; info.textContent = `${formatDateTime(t.startAt)} · ${t.durationMinutes||'-'} min`;
         info.style.marginTop='6px';
@@ -851,6 +1147,7 @@ document.addEventListener('DOMContentLoaded', () => {
           { id: 'status', label: 'Estado', type: 'select', value: 'IN_PROGRESS', options: [
             { label: 'En progreso', value: 'IN_PROGRESS' },
             { label: 'Pausada', value: 'PAUSED' },
+            { label: 'Detenido', value: 'STOPPED' },
             { label: 'Completada', value: 'COMPLETED' }
           ] }
         ],
@@ -878,6 +1175,47 @@ document.addEventListener('DOMContentLoaded', () => {
       const overlay = document.getElementById('form-overlay');
       const bodyEl = overlay?.querySelector('#form-body');
       if (bodyEl) { bodyEl.querySelectorAll('input, textarea').forEach(el => { el.style.background='#0b1220'; el.style.color='#e5e7eb'; el.style.border='1px solid #334155'; el.style.borderRadius='8px'; el.style.padding='8px 10px'; }); }
+
+      const startInput = overlay?.querySelector('#startAt');
+      const durationInput = overlay?.querySelector('#durationMinutes');
+      const startRow = startInput?.parentElement?.parentElement;
+      if (startRow && startInput && durationInput) {
+        let hint = startRow.querySelector('.task-overlap-hint');
+        if (!hint) {
+          hint = document.createElement('div');
+          hint.className = 'task-overlap-hint';
+          hint.style.marginTop = '8px';
+          hint.style.padding = '8px 10px';
+          hint.style.borderRadius = '8px';
+          hint.style.fontSize = '12px';
+          hint.style.fontWeight = '700';
+          startRow.appendChild(hint);
+        }
+        const renderOverlapHint = () => {
+          const overlap = findTaskOverlap(startInput.value, parseInt(durationInput.value || '0', 10));
+          if (overlap) {
+            hint.textContent = `Horario ocupado por: ${overlap.title || 'Tarea'} (${formatDateTime(overlap.startAt)})`;
+            hint.style.background = 'rgba(239,68,68,0.16)';
+            hint.style.border = '1px solid rgba(239,68,68,0.35)';
+            hint.style.color = '#fecaca';
+          } else if (!startInput.value || !durationInput.value) {
+            hint.textContent = 'Define inicio y duración para validar disponibilidad.';
+            hint.style.background = 'rgba(59,130,246,0.12)';
+            hint.style.border = '1px solid rgba(59,130,246,0.35)';
+            hint.style.color = '#bfdbfe';
+          } else {
+            hint.textContent = 'Horario disponible.';
+            hint.style.background = 'rgba(16,185,129,0.14)';
+            hint.style.border = '1px solid rgba(16,185,129,0.35)';
+            hint.style.color = '#a7f3d0';
+          }
+        };
+        startInput.addEventListener('input', renderOverlapHint);
+        startInput.addEventListener('change', renderOverlapHint);
+        durationInput.addEventListener('input', renderOverlapHint);
+        durationInput.addEventListener('change', renderOverlapHint);
+        renderOverlapHint();
+      }
     });
   }
 
@@ -898,6 +1236,39 @@ document.addEventListener('DOMContentLoaded', () => {
   }
   tasksSubtabListBtn?.addEventListener('click', ()=>setTasksSubtab('list'));
   tasksSubtabWeekBtn?.addEventListener('click', ()=>setTasksSubtab('week'));
+  weekCarouselPrevBtn?.addEventListener('click', ()=>{
+    weekCarouselOffsetDays -= 1;
+    renderWeekView(filteredTasks);
+  });
+  weekCarouselNextBtn?.addEventListener('click', ()=>{
+    weekCarouselOffsetDays += 1;
+    renderWeekView(filteredTasks);
+  });
+  document.addEventListener('keydown', (e) => {
+    const isWeekActive = tasksSubtabWeekBtn?.classList.contains('active');
+    if (!isWeekActive) return;
+    const tag = (document.activeElement?.tagName || '').toLowerCase();
+    if (tag === 'input' || tag === 'textarea' || tag === 'select') return;
+    if (e.key === 'ArrowLeft') {
+      e.preventDefault();
+      weekCarouselOffsetDays -= 1;
+      renderWeekView(filteredTasks);
+    } else if (e.key === 'ArrowRight') {
+      e.preventDefault();
+      weekCarouselOffsetDays += 1;
+      renderWeekView(filteredTasks);
+    }
+  });
+
+  function setPaymentsSubtab(which){
+    const isList = which === 'list';
+    paymentsSubtabListBtn?.classList.toggle('active', isList);
+    paymentsSubtabBanksBtn?.classList.toggle('active', !isList);
+    paymentsSubtabListView?.classList.toggle('hidden', !isList);
+    paymentsSubtabBanksView?.classList.toggle('hidden', isList);
+  }
+  paymentsSubtabListBtn?.addEventListener('click', ()=>setPaymentsSubtab('list'));
+  paymentsSubtabBanksBtn?.addEventListener('click', ()=>setPaymentsSubtab('banks'));
 
   // Toggle list button for tasks
   setupToggleList('toggle-tasks', '#tasks');
@@ -937,6 +1308,10 @@ document.addEventListener('DOMContentLoaded', () => {
       const date = new Date(calYear, calMonth, d);
       const cell = document.createElement('div');
       cell.style.border = '1px solid #1f2937'; cell.style.borderRadius='8px'; cell.style.padding='6px';
+      cell.style.minHeight = '110px';
+      cell.style.maxHeight = '240px';
+      cell.style.overflowY = 'auto';
+      cell.style.overflowX = 'hidden';
       const header = document.createElement('div'); header.textContent = String(d); header.style.fontWeight='700'; header.style.color='#e5e7eb'; cell.appendChild(header);
       const isPast = date < today;
       if (isPast){ cell.style.background='#7c2d12'; cell.style.borderColor='#f59e0b'; }
@@ -1009,6 +1384,8 @@ document.addEventListener('DOMContentLoaded', () => {
     CHILE: '/bancos/banco-chile.jpg',
     SANTANDER: '/bancos/banco-santander.png'
   };
+  setPaymentsSubtab('list');
+  renderBanksOverview(allPayments);
 
   function renderPayments(payments) {
     if (!paymentsListEl) return;
@@ -1104,7 +1481,7 @@ document.addEventListener('DOMContentLoaded', () => {
               paidInstallments: values.paidInstallments ? parseInt(values.paidInstallments,10) : undefined,
             };
             try {
-              const res = await fetch('/payments/' + p.id, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
+              const res = await fetch('/payments/' + p.id, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
               if (!res.ok) throw new Error(await res.text());
               showToast('Pago actualizado', 'success');
               await fetchPayments();
@@ -1135,6 +1512,138 @@ document.addEventListener('DOMContentLoaded', () => {
       li.appendChild(actions);
 
       paymentsListEl.appendChild(li);
+    });
+  }
+
+  function renderBanksOverview(payments){
+    if (!paymentsBanksListEl) return;
+    paymentsBanksListEl.innerHTML = '';
+    const profiles = normalizeBankProfilesMap(bankProfilesByBank);
+    const expenseTypes = new Set(['FIXED_EXPENSE', 'EXTRA_EXPENSE']);
+
+    BANKS_FIXED.forEach((bankKey) => {
+      const profile = normalizeBankProfile(profiles[bankKey] || {});
+      const bankPayments = (payments || []).filter(p => String(p.bank || '').toUpperCase() === bankKey);
+      const debtTotal = bankPayments
+        .filter(p => expenseTypes.has(p.type))
+        .reduce((acc, p) => acc + (Number(p.amount || 0) || 0), 0);
+      const paidByInstallmentsTotal = bankPayments
+        .filter(p => expenseTypes.has(p.type))
+        .reduce((acc, p) => {
+          const amount = Number(p.amount || 0) || 0;
+          const installments = Number(p.installments || 0);
+          const paidInstallments = Number(p.paidInstallments || 0);
+          if (installments > 0 && paidInstallments > 0) {
+            return acc + Math.round((amount / installments) * paidInstallments);
+          }
+          if (installments <= 0 && p.status === 'PAID') return acc + amount;
+          return acc;
+        }, 0);
+      const debtPending = Math.max(0, debtTotal - paidByInstallmentsTotal);
+      const debtCreditCard = Math.max(0, Number(profile.debtCreditCard || 0));
+      const debtCreditLine = Math.max(0, Number(profile.debtCreditLine || 0));
+      const debtAdvance = Math.max(0, Number(profile.debtAdvance || 0));
+      const debtConsumerCredit = Math.max(0, Number(profile.debtConsumerCredit || 0));
+      const totalDebtInput = debtCreditCard + debtCreditLine + debtAdvance + debtConsumerCredit;
+      const totalInstallments = Math.max(0, Number(profile.totalInstallments || 0));
+      const paidInstallments = Math.min(totalInstallments, Math.max(0, Number(profile.paidInstallments || 0)));
+      const pendingInstallments = Math.max(0, totalInstallments - paidInstallments);
+      const installmentAmountFromDebt = totalInstallments > 0 ? (totalDebtInput / totalInstallments) : 0;
+      const paidFromTotalDebt = totalInstallments > 0
+        ? Math.min(totalDebtInput, installmentAmountFromDebt * paidInstallments)
+        : 0;
+      const paymentStatus = deriveBankStatus({ debtPending, paidAmount: paidByInstallmentsTotal, bankProfileStatus: profile.paymentStatus });
+      let currentInstallmentLabel = 'Sin cuota pendiente';
+      if (totalInstallments > 0 && pendingInstallments > 0) {
+        const nextInstallment = paidInstallments + 1;
+        currentInstallmentLabel = `N° ${nextInstallment} de ${totalInstallments} (${formatCLP(installmentAmountFromDebt)})`;
+      }
+      const bankImg = BANK_ICON[bankKey] || '/bancos/default.png';
+
+      const card = document.createElement('article');
+      applyCard(card);
+      card.style.border = '1px solid #1f2937';
+      card.style.borderRadius = '12px';
+      card.style.padding = '12px';
+      card.style.background = '#0b1220';
+      card.style.boxShadow = '0 8px 22px rgba(0,0,0,0.32)';
+
+      card.innerHTML = `
+        <div style="display:flex; align-items:center; gap:10px; margin-bottom:10px;">
+          <img src="${escapeHtml(bankImg)}" alt="${escapeHtml(bankKey)}" style="width:34px; height:34px; object-fit:contain; border-radius:6px; border:1px solid #334155;" />
+          <strong style="color:#e5e7eb;" class="censor-title">${escapeHtml(bankKey)}</strong>
+        </div>
+        <div style="display:grid; grid-template-columns:repeat(2, minmax(120px, 1fr)); gap:8px 12px;">
+          <div><small style="color:#94a3b8;">Cupo total línea de crédito</small><div class="censor-message" style="color:#e5e7eb; font-weight:700;">${escapeHtml(formatCLP(profile.cupoTotal))}</div></div>
+          <div><small style="color:#94a3b8;">Deuda tarj. cred</small><div class="censor-message" style="color:#e5e7eb; font-weight:700;">${escapeHtml(formatCLP(debtCreditCard))}</div></div>
+          <div><small style="color:#94a3b8;">Deuda lin cred</small><div class="censor-message" style="color:#e5e7eb; font-weight:700;">${escapeHtml(formatCLP(debtCreditLine))}</div></div>
+          <div><small style="color:#94a3b8;">Deuda avance</small><div class="censor-message" style="color:#e5e7eb; font-weight:700;">${escapeHtml(formatCLP(debtAdvance))}</div></div>
+          <div><small style="color:#94a3b8;">Deuda credito de cons</small><div class="censor-message" style="color:#e5e7eb; font-weight:700;">${escapeHtml(formatCLP(debtConsumerCredit))}</div></div>
+          <div><small style="color:#94a3b8;">Deuda total</small><div class="censor-message" style="color:#e5e7eb; font-weight:700;">${escapeHtml(formatCLP(totalDebtInput))}</div></div>
+          <div><small style="color:#94a3b8;">Cuotas pagadas</small><div class="censor-message" style="color:#e5e7eb; font-weight:700;">${escapeHtml(String(paidInstallments))}</div></div>
+          <div><small style="color:#94a3b8;">Cuotas pendientes</small><div class="censor-message" style="color:#e5e7eb; font-weight:700;">${escapeHtml(String(pendingInstallments))}</div></div>
+          <div><small style="color:#94a3b8;">Monto pagado de la deuda total</small><div class="censor-message" style="color:#e5e7eb; font-weight:700;">${escapeHtml(formatCLP(paidFromTotalDebt))}</div></div>
+          <div><small style="color:#94a3b8;">Cuota actual a pagar</small><div class="censor-message" style="color:#e5e7eb; font-weight:700;">${escapeHtml(currentInstallmentLabel)}</div></div>
+          <div><small style="color:#94a3b8;">Estado del pago</small><div class="censor-message" style="color:#e5e7eb; font-weight:700;">${escapeHtml(paymentStatus)}</div></div>
+          <div><small style="color:#94a3b8;">Fecha de pago</small><div class="censor-message" style="color:#e5e7eb; font-weight:700;">${escapeHtml(fmtDateEs(profile.paymentDate))}</div></div>
+          <div><small style="color:#94a3b8;">Fecha de factura</small><div class="censor-message" style="color:#e5e7eb; font-weight:700;">${escapeHtml(fmtDateEs(profile.statementDate))}</div></div>
+        </div>
+      `;
+
+      const editBtn = document.createElement('button');
+      editBtn.textContent = 'Editar';
+      applyBtn(editBtn, 'primary');
+      editBtn.style.marginTop = '10px';
+      editBtn.addEventListener('click', () => {
+        showFormModal({
+          title: `Editar banco ${bankKey}`,
+          fields: [
+            { id: 'cupoTotal', label: 'Cupo total linea de credito (CLP $)', type: 'number', value: String(profile.cupoTotal || 0) },
+            { id: 'debtCreditCard', label: 'Deuda tarj. cred (CLP $)', type: 'number', value: String(profile.debtCreditCard || 0) },
+            { id: 'debtCreditLine', label: 'Deuda lin cred (CLP $)', type: 'number', value: String(profile.debtCreditLine || 0) },
+            { id: 'debtAdvance', label: 'Deuda avance (CLP $)', type: 'number', value: String(profile.debtAdvance || 0) },
+            { id: 'debtConsumerCredit', label: 'Deuda credito de cons (CLP $)', type: 'number', value: String(profile.debtConsumerCredit || 0) },
+            { id: 'paidInstallments', label: 'Cuotas pagadas', type: 'number', value: String(profile.paidInstallments || 0) },
+            { id: 'pendingInstallments', label: 'Cuotas pendientes', type: 'number', value: String(Math.max(0, (profile.totalInstallments || 0) - (profile.paidInstallments || 0))) },
+            { id: 'paymentStatus', label: 'Estado del pago', type: 'select', value: paymentStatus, options: [
+              { label: 'PENDIENTE', value: 'PENDIENTE' },
+              { label: 'PAGANDO', value: 'PAGANDO' },
+              { label: 'PAGADO', value: 'PAGADO' },
+              { label: 'PAUSADO', value: 'PAUSADO' }
+            ] },
+            { id: 'paymentDate', label: 'Fecha de pago', type: 'date', value: profile.paymentDate || '' },
+            { id: 'statementDate', label: 'Fecha de factura', type: 'date', value: profile.statementDate || '' }
+          ],
+          onSubmit: async (values) => {
+            const paidInstallmentsValue = Math.max(0, parseInt(values.paidInstallments || '0', 10) || 0);
+            const pendingInstallmentsValue = Math.max(0, parseInt(values.pendingInstallments || '0', 10) || 0);
+            const payload = {
+              totalLimit: Number(values.cupoTotal || 0) || 0,
+              debtCreditCard: Number(values.debtCreditCard || 0) || 0,
+              debtCreditLine: Number(values.debtCreditLine || 0) || 0,
+              debtAdvance: Number(values.debtAdvance || 0) || 0,
+              debtConsumerCredit: Number(values.debtConsumerCredit || 0) || 0,
+              totalInstallments: paidInstallmentsValue + pendingInstallmentsValue,
+              paidInstallments: paidInstallmentsValue,
+              paymentStatus: values.paymentStatus || null,
+              paymentDate: values.paymentDate || null,
+              statementDate: values.statementDate || null,
+            };
+            const res = await fetch('/bank-accounts/' + bankKey, {
+              method: 'PUT',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify(payload),
+            });
+            if (!res.ok) throw new Error(await res.text());
+            const updated = await res.json();
+            bankProfilesByBank[bankKey] = normalizeBankProfile(updated);
+            renderBanksOverview(allPayments);
+            showToast(`Banco ${bankKey} actualizado`, 'success');
+          }
+        });
+      });
+      card.appendChild(editBtn);
+      paymentsBanksListEl.appendChild(card);
     });
   }
 
@@ -1221,6 +1730,7 @@ document.addEventListener('DOMContentLoaded', () => {
     paymentsPage = 1;
     renderPaymentsPage();
     renderPaymentsSummary(filteredPayments);
+    renderBanksOverview(allPayments);
     renderPaymentFilterChips();
   }
 
@@ -1251,9 +1761,12 @@ document.addEventListener('DOMContentLoaded', () => {
 
   async function fetchPayments(){
     try {
-      const res = await fetch('/payments');
-      if (!res.ok) throw new Error('Error al obtener pagos');
-      allPayments = await res.json();
+      const [paymentsRes] = await Promise.all([
+        fetch('/payments'),
+        fetchBankProfiles({ silent: true }),
+      ]);
+      if (!paymentsRes.ok) throw new Error('Error al obtener pagos');
+      allPayments = await paymentsRes.json();
       applyPaymentsFilters();
       showToast('Pagos actualizados', 'success');
     } catch (err) {

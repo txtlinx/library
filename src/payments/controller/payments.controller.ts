@@ -1,4 +1,4 @@
-import { Body, Controller, Delete, Get, Param, Post, Put, BadRequestException, ParseIntPipe, Query } from '@nestjs/common';
+import { Body, Controller, Delete, Get, Param, Post, Put, Patch, BadRequestException, ParseIntPipe, Query } from '@nestjs/common';
 import { ApiBody, ApiOperation, ApiParam, ApiResponse, ApiTags } from '@nestjs/swagger';
 import { PaymentsService } from '../service/payments.service';
 
@@ -89,6 +89,16 @@ export class PaymentsController {
   @ApiParam({ name: 'id', required: true, description: 'ID del pago', example: 1 })
   @ApiResponse({ status: 200, description: 'Pago actualizado' })
   async update(@Param('id', ParseIntPipe) id: number, @Body() dto: UpdatePaymentDto) {
+    this.validate(dto, true);
+    const payload = { ...dto };
+    return this.payments.update(id, payload);
+  }
+
+  @Patch(':id')
+  @ApiOperation({ summary: 'Actualizar parcialmente un pago' })
+  @ApiParam({ name: 'id', required: true, description: 'ID del pago', example: 1 })
+  @ApiResponse({ status: 200, description: 'Pago actualizado (PATCH)' })
+  async patch(@Param('id', ParseIntPipe) id: number, @Body() dto: UpdatePaymentDto) {
     this.validate(dto, true);
     const payload = { ...dto };
     return this.payments.update(id, payload);

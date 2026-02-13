@@ -33,19 +33,33 @@ export class TasksService {
     const prismaAny = this.prisma as any;
     const results = await prismaAny.taskEntry.findMany({ orderBy: { createdAt: 'desc' } });
 
-    // Auto-completar tareas cuya duración ya terminó
+    // Auto-transiciones por tiempo:
+    // - PAUSED y dentro de su ventana => IN_PROGRESS
+    // - PAUSED fuera de ventana (pasada) => STOPPED
+    // - IN_PROGRESS cuyo tiempo terminó => STOPPED
     const now = Date.now();
-    const toCompleteIds: number[] = [];
+    const toProgressIds: number[] = [];
+    const toStopIds: number[] = [];
     results.forEach(r => {
-      if (r.status === 'IN_PROGRESS' && r.startAt) {
+      if (!r.startAt) return;
+      const startMs = new Date(r.startAt).getTime();
+      const endMs = startMs + Number(r.durationMinutes || 0) * 60_000;
+      if (r.status === 'PAUSED') {
+        if (now >= startMs && now < endMs) toProgressIds.push(r.id);
+        else if (now >= endMs) toStopIds.push(r.id);
+      } else if (r.status === 'IN_PROGRESS') {
+        if (now >= endMs) toStopIds.push(r.id);
+      } else if (r.status !== 'COMPLETED' && r.status !== 'STOPPED') {
         const startMs = new Date(r.startAt).getTime();
-        const endMs = startMs + Number(r.durationMinutes || 0) * 60_000;
-        if (now >= endMs) toCompleteIds.push(r.id);
+        if (now >= startMs) toProgressIds.push(r.id);
       }
-    });
-    if (toCompleteIds.length > 0) {
+    });    
+    if (toProgressIds.length > 0 || toStopIds.length > 0) {
       await Promise.all(
-        toCompleteIds.map(id => prismaAny.taskEntry.update({ where: { id }, data: { status: 'COMPLETED' } }))
+        [
+          ...toProgressIds.map(id => prismaAny.taskEntry.update({ where: { id }, data: { status: 'IN_PROGRESS' } })),
+          ...toStopIds.map(id => prismaAny.taskEntry.update({ where: { id }, data: { status: 'STOPPED' } })),
+        ]
       );
       // Recargar resultados para reflejar cambios
       const refreshed = await prismaAny.taskEntry.findMany({ orderBy: { createdAt: 'desc' } });
@@ -101,19 +115,22 @@ export class TasksService {
 
     // Mapear posibles términos de estado
     const tLow = term.toLowerCase();
-    const statusMap: Record<string, 'IN_PROGRESS'|'PAUSED'|'COMPLETED'|undefined> = {
+    const statusMap: Record<string, 'IN_PROGRESS'|'PAUSED'|'STOPPED'|'COMPLETED'|undefined> = {
       'in_progress': 'IN_PROGRESS',
       'en_proceso': 'IN_PROGRESS',
       'progreso': 'IN_PROGRESS',
       'pausada': 'PAUSED',
       'pausa': 'PAUSED',
-      'detenida': 'PAUSED',
+      'detenida': 'STOPPED',
+      'detenido': 'STOPPED',
+      'stop': 'STOPPED',
+      'stopped': 'STOPPED',
       'paused': 'PAUSED',
       'completada': 'COMPLETED',
       'terminada': 'COMPLETED',
       'completed': 'COMPLETED',
     };
-    const statusFilter = statusMap[tLow] || (['IN_PROGRESS','PAUSED','COMPLETED'].includes(term) ? (term as any) : undefined);
+    const statusFilter = statusMap[tLow] || (['IN_PROGRESS','PAUSED','STOPPED','COMPLETED'].includes(term) ? (term as any) : undefined);
 
     const results = await prismaAny.taskEntry.findMany({
       where: statusFilter ? {
@@ -184,7 +201,7 @@ export class TasksService {
     };
   }
 
-  async setStatus(id: number, status: 'IN_PROGRESS'|'PAUSED'|'COMPLETED') {
+  async setStatus(id: number, status: 'IN_PROGRESS'|'PAUSED'|'STOPPED'|'COMPLETED') {
     const task = await this.findOne(id);
     const startMs = task.startAt ? new Date(task.startAt).getTime() : 0;
     const now = Date.now();
@@ -203,7 +220,7 @@ export class TasksService {
     }
 
     // Si aún no ocurre el inicio y el estado solicitado no es IN_PROGRESS, forzar PAUSED
-    let statusToSet: 'IN_PROGRESS'|'PAUSED'|'COMPLETED' = status;
+    let statusToSet: 'IN_PROGRESS'|'PAUSED'|'STOPPED'|'COMPLETED' = status;
     if (now < startMs && status !== ('IN_PROGRESS' as any)) {
       statusToSet = 'PAUSED';
     }

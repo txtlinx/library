@@ -4,6 +4,7 @@ import { IsArray, IsDateString, IsInt, IsOptional, IsString, Min, IsEnum } from 
 export enum TaskStatusDto {
   IN_PROGRESS = 'IN_PROGRESS',
   PAUSED = 'PAUSED',
+  STOPPED = 'STOPPED',
   COMPLETED = 'COMPLETED',
 }
 

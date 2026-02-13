@@ -28,6 +28,7 @@ model ErrorImage {
 enum TaskStatus {
   IN_PROGRESS
   PAUSED
+  STOPPED
   COMPLETED
 }
 
@@ -67,6 +68,24 @@ model Payment {
   month         String?       // YYYY-MM: mes al que pertenece el pago
   createdAt     DateTime      @default(now())
   updatedAt     DateTime      @updatedAt
+}
+
+model BankAccount {
+  id            Int      @id @default(autoincrement())
+  bank          Bank     @unique
+  totalLimit    Float    @default(0)
+  totalDebt     Float    @default(0)
+  debtCreditCard Float   @default(0)
+  debtCreditLine Float   @default(0)
+  debtAdvance    Float   @default(0)
+  debtConsumerCredit Float @default(0)
+  totalInstallments Int  @default(0)
+  paidInstallments  Int  @default(0)
+  paymentStatus String?
+  paymentDate   String?
+  statementDate String?
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
 }
 
 model Note {

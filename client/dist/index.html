@@ -94,6 +94,24 @@
         <div><strong>Tu IP:</strong> <span id="ip">cargando...</span></div>
         <div><strong>Hora local:</strong> <span id="time-local">--:--:--</span></div>
         <div><strong>Hora Santiago de Chile:</strong> <span id="time-santiago">--:--:--</span></div>
+        <div><strong>Dólar (USD → CLP):</strong> <span id="usd-clp">cargando...</span></div>
+        <div><strong>Dólar (USD → BRL):</strong> <span id="usd-brl">cargando...</span></div>
+        <div style="margin-top:8px; padding:10px; border:1px solid #334155; border-radius:10px; background:#0b1220;">
+          <div style="display:flex; align-items:center; gap:8px; flex-wrap:wrap; margin-bottom:8px;">
+            <strong>Conversor:</strong>
+            <input id="fx-amount-input" type="number" step="0.01" min="0" placeholder="Escribe un monto" class="input" style="max-width:180px;" />
+            <select id="fx-base-currency" class="input" style="max-width:170px;">
+              <option value="USD">Monto en USD</option>
+              <option value="CLP">Monto en CLP</option>
+              <option value="BRL">Monto en BRL</option>
+            </select>
+          </div>
+          <div style="display:flex; gap:10px; flex-wrap:wrap; color:#cbd5e1;">
+            <span>CLP: <strong id="fx-out-clp">--</strong></span>
+            <span>BRL: <strong id="fx-out-brl">--</strong></span>
+            <span>USD: <strong id="fx-out-usd">--</strong></span>
+          </div>
+        </div>
       </div>
 
       <section id="errors-section" data-section="errors">
@@ -166,6 +184,7 @@
               <option value="">(por defecto: En proceso)</option>
               <option value="IN_PROGRESS">En proceso</option>
               <option value="PAUSED">Detenida</option>
+              <option value="STOPPED">Detenido</option>
               <option value="COMPLETED">Terminada</option>
             </select>
           </label><br/>
@@ -173,6 +192,7 @@
         </form>
 
         <h2 style="margin-top: 16px;">Lista de tareas <button id="toggle-tasks" class="toggle-list-btn" type="button">Contraer</button> <button id="tasks-censor-toggle" type="button" title="Ocultar contenido" style="background:#6b7280; margin-left:8px;">Modo P: OFF</button> <button id="tasks-calendar-btn" type="button" title="Calendario" style="background:#374151; margin-left:8px; display:inline-flex; align-items:center; gap:6px;">📅 Calendario</button></h2>
+        <div id="tasks-start-alert" class="card" style="display:none; margin:8px 0 10px; padding:10px; border:1px solid #f59e0b; background:linear-gradient(180deg,#7c2d12,#5b1e0d); color:#fde68a; font-weight:700;"></div>
         <!-- Filtros superiores removidos -->
         <!--
         <div class="filters-row" style="margin-bottom:12px;">
@@ -224,23 +244,32 @@
         </div>
         <ul id="tasks" class="collapsible expanded card"></ul>
         <div id="week-view-container" class="hidden card" style="margin-top:12px;">
-          <h3 style="margin-bottom:8px;">Semana (Lunes a Viernes)</h3>
+          <div style="display:flex; align-items:center; justify-content:space-between; gap:8px; flex-wrap:wrap; margin-bottom:8px;">
+            <h3 style="margin:0;">Vista por días (Carrusel)</h3>
+            <div style="display:flex; align-items:center; gap:8px;">
+              <button id="week-carousel-prev" type="button" class="btn btn-neutral" title="Día anterior (←)" aria-label="Ver día anterior">◀</button>
+              <span id="week-carousel-range" style="color:#cbd5e1; font-weight:700; min-width:220px; text-align:center;"></span>
+              <button id="week-carousel-next" type="button" class="btn btn-neutral" title="Día siguiente (→)" aria-label="Ver día siguiente">▶</button>
+            </div>
+          </div>
           <div id="week-view"></div>
         </div>
         <!-- Modal Calendario de tareas -->
-        <div id="tasks-calendar-modal" style="display:none; position:fixed; inset:0; background:rgba(2,6,23,0.7); backdrop-filter: blur(2px); z-index:1000; align-items:center; justify-content:center;">
-          <div style="background:#0b1220; color:#e5e7eb; padding:16px; border:1px solid #1f2937; border-radius:12px; width:92%; max-width:720px; box-shadow:0 20px 50px rgba(0,0,0,0.6);">
-            <div style="display:flex; align-items:center; justify-content:space-between; margin-bottom:12px;">
+        <div id="tasks-calendar-modal" style="display:none; position:fixed; inset:0; background:rgba(2,6,23,0.7); backdrop-filter: blur(2px); z-index:1000; align-items:center; justify-content:center; padding:12px; box-sizing:border-box;">
+          <div style="background:#0b1220; color:#e5e7eb; padding:16px; border:1px solid #1f2937; border-radius:12px; width:min(96vw, 1280px); max-height:92vh; overflow:auto; box-shadow:0 20px 50px rgba(0,0,0,0.6);">
+            <div style="display:flex; align-items:center; justify-content:space-between; margin-bottom:12px; gap:8px; flex-wrap:wrap;">
               <strong style="font-size:18px;">Calendario de tareas</strong>
-              <div style="display:flex; align-items:center; gap:8px;">
+              <div style="display:flex; align-items:center; gap:8px; flex-wrap:wrap;">
                 <button id="cal-prev" style="background:#374151; color:#fff; padding:6px 10px; border:none; border-radius:6px; cursor:pointer;">◀</button>
                 <div id="cal-header" style="min-width:160px; text-align:center; font-weight:600; color:#cbd5e1;"></div>
                 <button id="cal-next" style="background:#374151; color:#fff; padding:6px 10px; border:none; border-radius:6px; cursor:pointer;">▶</button>
                 <button id="cal-close" style="background:#ef4444; color:#fff; padding:6px 10px; border:none; border-radius:6px; cursor:pointer;">Cerrar</button>
               </div>
             </div>
-            <div id="cal-grid" style="display:grid; grid-template-columns: repeat(7, 1fr); gap:8px;">
-              <!-- headers and days rendered by JS -->
+            <div id="cal-grid-wrap" style="overflow:auto; width:100%;">
+              <div id="cal-grid" style="display:grid; grid-template-columns: repeat(7, minmax(130px, 1fr)); gap:8px; min-width:910px;">
+                <!-- headers and days rendered by JS -->
+              </div>
             </div>
             <div style="display:flex; align-items:center; justify-content:space-between; margin-top:12px;">
               <small style="color:#cbd5e1;">Leyenda: <span style="display:inline-block; width:10px; height:10px; background:#7c2d12; border:1px solid #f59e0b; border-radius:2px; vertical-align:middle; margin:0 4px 0 8px;"></span> Pasado <span style="display:inline-block; width:10px; height:10px; background:#0b2a5b; border:1px solid #3b82f6; border-radius:2px; vertical-align:middle; margin:0 4px 0 12px;"></span> Futuro</small>
@@ -256,6 +285,11 @@
         </div>
       </section>
       <section id="payments-section" data-section="payments" class="hidden">
+        <div class="subtabs">
+          <button id="payments-subtab-list" class="subtab-btn active" type="button" data-subtab="list">Lista</button>
+          <button id="payments-subtab-banks" class="subtab-btn" type="button" data-subtab="banks">Bancos</button>
+        </div>
+        <div id="payments-subtab-list-view">
         <h2>Crear pago</h2>
         <button id="payment-create-toggle" type="button" class="btn btn-primary" style="margin-bottom:8px;">Crear pago</button>
         <form id="payment-create-form" style="display:none;">
@@ -363,6 +397,12 @@
               <div class="legend-item"><span class="legend-dot" style="background:linear-gradient(45deg,#10b981,#ef4444);"></span><span class="legend-label">Balance (ingresos - gastos):</span> <span id="legend-balance" class="legend-value">$0</span></div>
             </div>
           </div>
+        </div>
+        </div>
+        <div id="payments-subtab-banks-view" class="hidden">
+          <h2 style="margin-top: 4px;">Bancos</h2>
+          <p style="color:#94a3b8; margin-top:0;">Resumen por banco con valores fijos editables y totales de pagos.</p>
+          <div id="payments-banks-list" class="card" style="display:grid; grid-template-columns:repeat(auto-fit,minmax(280px,1fr)); gap:12px;"></div>
         </div>
       </section>
       <section id="notes-section" data-section="notes" class="hidden">
