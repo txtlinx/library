@@ -17,6 +17,7 @@ document.addEventListener('DOMContentLoaded', () => {
   const tasksMinDurInput = document.getElementById('tasks-min-duration');
   const tasksStatusSel = document.getElementById('tasks-status-filter');
   const tasksTagFilterInput = document.getElementById('tasks-tag-filter');
+  const tasksSearchAnyInput = document.getElementById('tasks-search-any');
   const taskCreateToggle = document.getElementById('task-create-toggle');
   const weekViewContainer = document.getElementById('week-view-container');
   const weekViewEl = document.getElementById('week-view');
@@ -55,6 +56,7 @@ document.addEventListener('DOMContentLoaded', () => {
   const paymentsPageNext = document.getElementById('payments-page-next');
   const paymentsPageInfo = document.getElementById('payments-page-info');
   const paymentsPageSizeSel = document.getElementById('payments-page-size');
+  const paymentsSearchAnyInput = document.getElementById('payments-search-any');
 
   // Notes selectors
   const notesListEl = document.getElementById('notes');
@@ -120,6 +122,32 @@ document.addEventListener('DOMContentLoaded', () => {
     'Gasto fijo': { bg:'#7c2d12', fg:'#fde68a' },
     'Ingreso': { bg:'#065f46', fg:'#d1fae5' }
   };
+
+  // Glow focus consistente para todos los campos de formulario
+  function isGlowField(el) {
+    if (!el) return false;
+    const tag = (el.tagName || '').toLowerCase();
+    if (!['input', 'textarea', 'select'].includes(tag)) return false;
+    const t = (el.getAttribute('type') || '').toLowerCase();
+    return t !== 'checkbox' && t !== 'radio';
+  }
+  function applyFieldGlow(el) {
+    if (!isGlowField(el)) return;
+    if (el.dataset.prevBorderColor == null) el.dataset.prevBorderColor = el.style.borderColor || '';
+    if (el.dataset.prevBoxShadow == null) el.dataset.prevBoxShadow = el.style.boxShadow || '';
+    if (el.dataset.prevTransform == null) el.dataset.prevTransform = el.style.transform || '';
+    el.style.borderColor = '#38bdf8';
+    el.style.boxShadow = '0 10px 24px rgba(2,132,199,0.35), 0 0 0 1px rgba(125,211,252,0.35) inset, 0 0 0 3px rgba(14,165,233,0.22)';
+    el.style.transform = 'translateY(-1px)';
+  }
+  function clearFieldGlow(el) {
+    if (!isGlowField(el)) return;
+    el.style.borderColor = el.dataset.prevBorderColor || '';
+    el.style.boxShadow = el.dataset.prevBoxShadow || '';
+    el.style.transform = el.dataset.prevTransform || '';
+  }
+  document.addEventListener('focusin', (e) => applyFieldGlow(e.target));
+  document.addEventListener('focusout', (e) => clearFieldGlow(e.target));
   const BANKS_FIXED = ['FALABELLA', 'ESTADO', 'CHILE', 'SANTANDER'];
 
   function applyBtn(el, variant='primary'){ if (!el) return; el.classList.add('btn'); if (variant) el.classList.add('btn-'+variant); }
@@ -395,6 +423,59 @@ document.addEventListener('DOMContentLoaded', () => {
     });
   }
 
+  function attachFlatpickrIfAvailable(input, cfg = {}) {
+    if (!input || typeof window.flatpickr !== 'function') return null;
+    try {
+      const locale = window.flatpickr.l10ns?.es ? window.flatpickr.l10ns.es : undefined;
+      return window.flatpickr(input, { ...cfg, locale, disableMobile: true });
+    } catch {
+      return null;
+    }
+  }
+  function getTaskCountByDayMap() {
+    const map = new Map();
+    const src = (filteredTasks && filteredTasks.length ? filteredTasks : allTasks) || [];
+    src.forEach((t) => {
+      if (!t || !t.startAt) return;
+      const key = localDateKey(t.startAt);
+      map.set(key, (map.get(key) || 0) + 1);
+    });
+    return map;
+  }
+  function decorateDayWithTaskCount(dayElem, count) {
+    if (!dayElem || !count) return;
+    const badge = document.createElement('span');
+    badge.textContent = String(count);
+    badge.title = `${count} tarea${count === 1 ? '' : 's'}`;
+    badge.style.position = 'absolute';
+    badge.style.top = '3px';
+    badge.style.right = '3px';
+    badge.style.minWidth = '16px';
+    badge.style.height = '16px';
+    badge.style.borderRadius = '999px';
+    badge.style.display = 'inline-flex';
+    badge.style.alignItems = 'center';
+    badge.style.justifyContent = 'center';
+    badge.style.fontSize = '10px';
+    badge.style.fontWeight = '800';
+    badge.style.lineHeight = '1';
+    badge.style.color = '#f8fafc';
+    badge.style.background = 'linear-gradient(135deg,#06b6d4,#2563eb)';
+    badge.style.border = '1px solid rgba(186,230,253,0.55)';
+    badge.style.boxShadow = '0 4px 10px rgba(2,132,199,0.32)';
+    dayElem.style.position = 'relative';
+    dayElem.appendChild(badge);
+  }
+  function monthPluginConfig() {
+    if (typeof window.monthSelectPlugin !== 'function') return null;
+    return window.monthSelectPlugin({
+      shorthand: true,
+      dateFormat: 'Y-m',
+      altFormat: 'F Y',
+      theme: 'dark',
+    });
+  }
+
   // Modal de formulario (crear/editar)
   function ensureFormModal() {
     let overlay = document.getElementById('form-overlay');
@@ -404,7 +485,7 @@ document.addEventListener('DOMContentLoaded', () => {
       overlay.style.display='flex'; overlay.style.alignItems='center'; overlay.style.justifyContent='center'; overlay.style.zIndex='10003';
       overlay.style.visibility='hidden'; overlay.style.opacity='0'; overlay.style.transition='opacity 0.15s ease-out, visibility 0.15s ease-out';
       overlay.innerHTML = `
-        <div class="form-modal" role="dialog" aria-modal="true" aria-labelledby="form-title" style="background:#020617;border:1px solid #1f2937;border-radius:12px;max-width:520px;width:92%;padding:16px;box-shadow:0 20px 60px rgba(0,0,0,0.7);max-height:90vh;overflow:auto;">
+        <div class="form-modal" role="dialog" aria-modal="true" aria-labelledby="form-title" style="background:radial-gradient(circle at top, rgba(14,116,144,0.18), rgba(2,6,23,0.96) 48%), #020617;border:1px solid #164e63;border-radius:14px;max-width:520px;width:92%;padding:16px;box-shadow:0 20px 60px rgba(0,0,0,0.7), 0 0 0 1px rgba(56,189,248,0.18) inset;max-height:90vh;overflow:auto;">
           <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;">
             <div id="form-title" style="font-weight:700;color:#f8fafc;">Formulario</div>
             <button id="form-close" class="btn btn-neutral" style="font-size:14px;padding:4px 8px;">×</button>
@@ -438,20 +519,42 @@ document.addEventListener('DOMContentLoaded', () => {
         } else if (f.type==='datetime-local'){
           const wrap = document.createElement('div');
           wrap.style.display='flex'; wrap.style.alignItems='center'; wrap.style.gap='8px';
-          wrap.style.background='#0b1220'; wrap.style.border='1px solid #334155'; wrap.style.borderRadius='10px'; wrap.style.padding='8px'; wrap.style.boxShadow='0 6px 18px rgba(0,0,0,0.3)';
-          input=document.createElement('input'); input.type='datetime-local'; input.id=f.id; input.value=f.value||'';
-          input.style.flex='1'; input.style.background='#0b1220'; input.style.color='#e5e7eb'; input.style.border='none'; input.style.outline='none'; input.style.padding='8px 10px'; input.style.borderRadius='8px';
-          const btn=document.createElement('button'); btn.type='button'; btn.textContent='📅'; btn.title='Abrir calendario'; btn.style.background='#3b82f6'; btn.style.color='#fff'; btn.style.border='none'; btn.style.borderRadius='8px'; btn.style.padding='8px 10px'; btn.style.cursor='pointer'; btn.style.boxShadow='0 4px 12px rgba(0,0,0,0.25)';
-          btn.addEventListener('click', ()=>{ try { if (typeof input.showPicker === 'function') input.showPicker(); else input.focus(); } catch { input.focus(); } });
+          wrap.style.background='linear-gradient(135deg, rgba(14,116,144,0.22), rgba(30,64,175,0.16) 45%, rgba(11,18,32,0.98) 100%)';
+          wrap.style.border='1px solid #0ea5e9'; wrap.style.borderRadius='12px'; wrap.style.padding='8px'; wrap.style.boxShadow='0 8px 22px rgba(2,132,199,0.25), 0 0 0 1px rgba(125,211,252,0.25) inset';
+          input=document.createElement('input'); input.type='text'; input.id=f.id; input.value=f.value||''; input.placeholder='YYYY-MM-DDTHH:mm';
+          input.style.flex='1'; input.style.background='rgba(2,6,23,0.55)'; input.style.color='#f0f9ff'; input.style.border='none'; input.style.outline='none'; input.style.padding='10px 12px'; input.style.borderRadius='9px'; input.style.fontWeight='700';
+          const btn=document.createElement('button'); btn.type='button'; btn.textContent='📅'; btn.title='Abrir calendario'; btn.style.background='linear-gradient(135deg,#06b6d4,#3b82f6)'; btn.style.color='#fff'; btn.style.border='1px solid rgba(186,230,253,0.55)'; btn.style.borderRadius='10px'; btn.style.padding='9px 11px'; btn.style.cursor='pointer'; btn.style.boxShadow='0 8px 16px rgba(37,99,235,0.35)';
+          const taskCountMap = getTaskCountByDayMap();
+          const fp = attachFlatpickrIfAvailable(input, {
+            enableTime: true,
+            time_24hr: true,
+            minuteIncrement: 5,
+            allowInput: true,
+            dateFormat: 'Y-m-d\\TH:i',
+            defaultDate: f.value || undefined,
+            onDayCreate: (_dObj, _dStr, _fp, dayElem) => {
+              const key = localDateKey(dayElem.dateObj);
+              const count = taskCountMap.get(key) || 0;
+              decorateDayWithTaskCount(dayElem, count);
+            },
+          });
+          btn.addEventListener('click', ()=>{ if (fp && typeof fp.open === 'function') fp.open(); else input.focus(); });
+          input.addEventListener('focus', ()=>{ wrap.style.transform='translateY(-1px)'; wrap.style.boxShadow='0 10px 24px rgba(2,132,199,0.35), 0 0 0 1px rgba(125,211,252,0.35) inset'; });
+          input.addEventListener('blur', ()=>{ wrap.style.transform='none'; wrap.style.boxShadow='0 8px 22px rgba(2,132,199,0.25), 0 0 0 1px rgba(125,211,252,0.25) inset'; });
           wrap.appendChild(input); wrap.appendChild(btn); row.appendChild(wrap);
         } else if (f.type==='month'){
           const wrap = document.createElement('div');
           wrap.style.display='flex'; wrap.style.alignItems='center'; wrap.style.gap='8px';
-          wrap.style.background='#0b1220'; wrap.style.border='1px solid #334155'; wrap.style.borderRadius='10px'; wrap.style.padding='8px'; wrap.style.boxShadow='0 6px 18px rgba(0,0,0,0.3)';
-          input=document.createElement('input'); input.type='month'; input.id=f.id; input.value=f.value||'';
-          input.style.flex='1'; input.style.background='#0b1220'; input.style.color='#e5e7eb'; input.style.border='none'; input.style.outline='none'; input.style.padding='8px 10px'; input.style.borderRadius='8px';
-          const btn=document.createElement('button'); btn.type='button'; btn.textContent='📅'; btn.title='Abrir calendario'; btn.style.background='#3b82f6'; btn.style.color='#fff'; btn.style.border='none'; btn.style.borderRadius='8px'; btn.style.padding='8px 10px'; btn.style.cursor='pointer'; btn.style.boxShadow='0 4px 12px rgba(0,0,0,0.25)';
-          btn.addEventListener('click', ()=>{ try { if (typeof input.showPicker === 'function') input.showPicker(); else input.focus(); } catch { input.focus(); } });
+          wrap.style.background='linear-gradient(135deg, rgba(14,116,144,0.22), rgba(30,64,175,0.16) 45%, rgba(11,18,32,0.98) 100%)';
+          wrap.style.border='1px solid #0ea5e9'; wrap.style.borderRadius='12px'; wrap.style.padding='8px'; wrap.style.boxShadow='0 8px 22px rgba(2,132,199,0.25), 0 0 0 1px rgba(125,211,252,0.25) inset';
+          input=document.createElement('input'); input.type='text'; input.id=f.id; input.value=f.value||''; input.placeholder='YYYY-MM';
+          input.style.flex='1'; input.style.background='rgba(2,6,23,0.55)'; input.style.color='#f0f9ff'; input.style.border='none'; input.style.outline='none'; input.style.padding='10px 12px'; input.style.borderRadius='9px'; input.style.fontWeight='700';
+          const btn=document.createElement('button'); btn.type='button'; btn.textContent='📅'; btn.title='Abrir calendario'; btn.style.background='linear-gradient(135deg,#06b6d4,#3b82f6)'; btn.style.color='#fff'; btn.style.border='1px solid rgba(186,230,253,0.55)'; btn.style.borderRadius='10px'; btn.style.padding='9px 11px'; btn.style.cursor='pointer'; btn.style.boxShadow='0 8px 16px rgba(37,99,235,0.35)';
+          const monthPlugin = monthPluginConfig();
+          const fp = attachFlatpickrIfAvailable(input, monthPlugin ? { plugins: [monthPlugin], defaultDate: f.value || undefined } : { dateFormat: 'Y-m', defaultDate: f.value || undefined });
+          btn.addEventListener('click', ()=>{ if (fp && typeof fp.open === 'function') fp.open(); else input.focus(); });
+          input.addEventListener('focus', ()=>{ wrap.style.transform='translateY(-1px)'; wrap.style.boxShadow='0 10px 24px rgba(2,132,199,0.35), 0 0 0 1px rgba(125,211,252,0.35) inset'; });
+          input.addEventListener('blur', ()=>{ wrap.style.transform='none'; wrap.style.boxShadow='0 8px 22px rgba(2,132,199,0.25), 0 0 0 1px rgba(125,211,252,0.25) inset'; });
           wrap.appendChild(input); wrap.appendChild(btn); row.appendChild(wrap);
         } else if (f.type==='select'){
           input=document.createElement('select');
@@ -475,6 +578,29 @@ document.addEventListener('DOMContentLoaded', () => {
     async function onSubmitClick(e){ e.preventDefault(); const values={}; fields.forEach(f=>{ const el=overlay.querySelector('#'+f.id); if (!el) return; if (f.type==='file'){ values[f.id]=el.files; } else { values[f.id]=(el.value||'').trim(); } }); cleanup(); try { await onSubmit(values); } catch (err) { console.error('form submit error', err); await showMessageModal('No se pudo enviar el formulario', { title: 'Error' }); } }
     btnCancel.addEventListener('click', onCancel); btnSubmit.addEventListener('click', onSubmitClick); btnClose.addEventListener('click', onCancel); overlay.addEventListener('click', onOverlayClick); document.addEventListener('keydown', onKey);
     overlay.style.visibility='visible'; overlay.style.opacity='1'; setTimeout(()=>{ try { btnSubmit.focus(); } catch {} },0);
+  }
+
+  function wireStaticFlatpickrInputs() {
+    const monthPlugin = monthPluginConfig();
+    document.querySelectorAll('input[type="date"]').forEach((el) => {
+      if (el.dataset.fpBound) return;
+      el.type = 'text';
+      attachFlatpickrIfAvailable(el, { dateFormat: 'Y-m-d', defaultDate: el.value || undefined });
+      el.dataset.fpBound = '1';
+    });
+    document.querySelectorAll('input[type="datetime-local"]').forEach((el) => {
+      if (el.dataset.fpBound) return;
+      el.type = 'text';
+      attachFlatpickrIfAvailable(el, { enableTime: true, time_24hr: true, minuteIncrement: 5, dateFormat: 'Y-m-d\\TH:i', defaultDate: el.value || undefined });
+      el.dataset.fpBound = '1';
+    });
+    document.querySelectorAll('input[type="month"]').forEach((el) => {
+      if (el.dataset.fpBound) return;
+      el.type = 'text';
+      if (monthPlugin) attachFlatpickrIfAvailable(el, { plugins: [monthPlugin], defaultDate: el.value || undefined });
+      else attachFlatpickrIfAvailable(el, { dateFormat: 'Y-m', defaultDate: el.value || undefined });
+      el.dataset.fpBound = '1';
+    });
   }
 
   // Render de errores
@@ -577,7 +703,7 @@ document.addEventListener('DOMContentLoaded', () => {
   setupPersistentCensorToggle('notes-censor-toggle', 'notes-section');
 
   function applyTaskFilters() {
-    const q = ''; // se retiró input de búsqueda superior
+    const q = (tasksSearchAnyInput?.value || '').trim().toLowerCase();
     const minDur = parseInt(tasksMinDurInput?.value || '0', 10) || 0;
     const status = tasksStatusSel?.value || '';
     const tagFilter = (tasksTagFilterInput?.value || '').trim().toLowerCase();
@@ -585,6 +711,20 @@ document.addEventListener('DOMContentLoaded', () => {
     const from = tasksDateFrom?.value || '';
     const to = tasksDateTo?.value || '';
     filteredTasks = allTasks.filter(t => {
+      if (q) {
+        const statusTxt = String(getEffectiveTaskStatus(t) || '').toLowerCase();
+        const haystack = [
+          t?.id,
+          t?.title,
+          t?.description,
+          t?.startAt,
+          t?.createdAt,
+          t?.durationMinutes,
+          statusTxt,
+          Array.isArray(t?.tags) ? t.tags.join(' ') : String(t?.tags || ''),
+        ].map(v => String(v || '').toLowerCase()).join(' ');
+        if (!haystack.includes(q)) return false;
+      }
       // min duration
       if (minDur > 0 && (t.durationMinutes || 0) < minDur) return false;
       // status
@@ -626,6 +766,7 @@ document.addEventListener('DOMContentLoaded', () => {
   tasksPagePrev?.addEventListener('click', ()=>{ tasksPage = Math.max(1, tasksPage - 1); renderTasksPage(); });
   tasksPageNext?.addEventListener('click', ()=>{ tasksPage = tasksPage + 1; renderTasksPage(); });
   tasksPageSizeSel?.addEventListener('change', ()=>{ tasksPageSize = parseInt(tasksPageSizeSel.value || '10', 10) || 10; tasksPage = 1; renderTasksPage(); });
+  tasksSearchAnyInput?.addEventListener('input', applyTaskFilters);
   tasksDateFrom?.addEventListener('change', applyTaskFilters);
   tasksDateTo?.addEventListener('change', applyTaskFilters);
   tasksDateClear?.addEventListener('click', ()=>{ if (tasksDateFrom) tasksDateFrom.value=''; if (tasksDateTo) tasksDateTo.value=''; applyTaskFilters(); });
@@ -920,6 +1061,92 @@ document.addEventListener('DOMContentLoaded', () => {
     const bodyEl = overlay?.querySelector('#form-body');
     if (bodyEl) { bodyEl.querySelectorAll('input, textarea').forEach(el => { el.style.background='#0b1220'; el.style.color='#e5e7eb'; el.style.border='1px solid #334155'; el.style.borderRadius='8px'; el.style.padding='8px 10px'; }); }
   }
+  function toLocalDateTimeValue(dtLike){
+    const d = new Date(dtLike);
+    return `${d.getFullYear()}-${pad2(d.getMonth()+1)}-${pad2(d.getDate())}T${pad2(d.getHours())}:${pad2(d.getMinutes())}`;
+  }
+  function openTaskCreateModal(prefill = {}){
+    showFormModal({
+      title: 'Nueva tarea',
+      fields: [
+        { id: 'title', label: 'Título', type: 'text', value: prefill.title || '' },
+        { id: 'description', label: 'Descripción (opcional)', type: 'textarea', rows: 3, value: prefill.description || '' },
+        { id: 'startAt', label: 'Inicio', type: 'datetime-local', value: prefill.startAt || '' },
+        { id: 'durationMinutes', label: 'Duración (minutos)', type: 'number', value: prefill.durationMinutes != null ? String(prefill.durationMinutes) : '' },
+        { id: 'tags', label: 'Tags (separados por coma)', type: 'text', value: prefill.tags || '' },
+        { id: 'status', label: 'Estado', type: 'select', value: prefill.status || 'IN_PROGRESS', options: [
+          { label: 'En progreso', value: 'IN_PROGRESS' },
+          { label: 'Pausada', value: 'PAUSED' },
+          { label: 'Detenido', value: 'STOPPED' },
+          { label: 'Completada', value: 'COMPLETED' }
+        ] }
+      ],
+      onSubmit: async (values) => {
+        const payload = {
+          title: values.title || '',
+          description: values.description || undefined,
+          startAt: values.startAt || new Date().toISOString(),
+          durationMinutes: values.durationMinutes ? parseInt(values.durationMinutes, 10) : 30,
+          tags: (values.tags || '').split(',').map(t => t.trim()).filter(Boolean),
+          status: values.status || undefined,
+        };
+        try {
+          const res = await fetch('/tasks', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
+          if (!res.ok) throw new Error(await res.text());
+          showToast('Tarea creada', 'success');
+          await fetchTasks(true);
+          await showMessageModal('Tarea creada correctamente', { title: 'Nueva tarea' });
+        } catch (err) {
+          console.error(err);
+          await showMessageModal('No se pudo crear la tarea', { title: 'Error' });
+        }
+      }
+    });
+    const overlay = document.getElementById('form-overlay');
+    const bodyEl = overlay?.querySelector('#form-body');
+    if (bodyEl) { bodyEl.querySelectorAll('input, textarea').forEach(el => { el.style.background='#0b1220'; el.style.color='#e5e7eb'; el.style.border='1px solid #334155'; el.style.borderRadius='8px'; el.style.padding='8px 10px'; }); }
+
+    const startInput = overlay?.querySelector('#startAt');
+    const durationInput = overlay?.querySelector('#durationMinutes');
+    const startRow = startInput?.parentElement?.parentElement;
+    if (startRow && startInput && durationInput) {
+      let hint = startRow.querySelector('.task-overlap-hint');
+      if (!hint) {
+        hint = document.createElement('div');
+        hint.className = 'task-overlap-hint';
+        hint.style.marginTop = '8px';
+        hint.style.padding = '8px 10px';
+        hint.style.borderRadius = '8px';
+        hint.style.fontSize = '12px';
+        hint.style.fontWeight = '700';
+        startRow.appendChild(hint);
+      }
+      const renderOverlapHint = () => {
+        const overlap = findTaskOverlap(startInput.value, parseInt(durationInput.value || '0', 10));
+        if (overlap) {
+          hint.textContent = `Horario ocupado por: ${overlap.title || 'Tarea'} (${formatDateTime(overlap.startAt)})`;
+          hint.style.background = 'rgba(239,68,68,0.16)';
+          hint.style.border = '1px solid rgba(239,68,68,0.35)';
+          hint.style.color = '#fecaca';
+        } else if (!startInput.value || !durationInput.value) {
+          hint.textContent = 'Define inicio y duración para validar disponibilidad.';
+          hint.style.background = 'rgba(59,130,246,0.12)';
+          hint.style.border = '1px solid rgba(59,130,246,0.35)';
+          hint.style.color = '#bfdbfe';
+        } else {
+          hint.textContent = 'Horario disponible.';
+          hint.style.background = 'rgba(16,185,129,0.14)';
+          hint.style.border = '1px solid rgba(16,185,129,0.35)';
+          hint.style.color = '#a7f3d0';
+        }
+      };
+      startInput.addEventListener('input', renderOverlapHint);
+      startInput.addEventListener('change', renderOverlapHint);
+      durationInput.addEventListener('input', renderOverlapHint);
+      durationInput.addEventListener('change', renderOverlapHint);
+      renderOverlapHint();
+    }
+  }
 
   function formatDateTime(iso){ if (!iso) return ''; try { const d=new Date(iso); return new Intl.DateTimeFormat('es-CL',{ weekday:'short', day:'2-digit', month:'short', hour:'2-digit', minute:'2-digit', hour12:false }).format(d); } catch { return String(iso); } }
   function localDateKey(dtLike){
@@ -968,11 +1195,17 @@ document.addEventListener('DOMContentLoaded', () => {
 
   async function replicateTask(task, resolvedStatus){
     try {
+      const nextReplicaNumber = (allTasks || [])
+        .map(t => {
+          const m = String(t?.title || '').match(/^Task\s*#\s*(\d+)$/i);
+          return m ? Number(m[1]) : 0;
+        })
+        .reduce((max, n) => Math.max(max, n), 0) + 1;
       const nowSafeIso = new Date(Date.now() + 2 * 60 * 1000).toISOString();
       const originalStart = task?.startAt ? new Date(task.startAt).toISOString() : nowSafeIso;
       const shouldUseNow = resolvedStatus === 'STOPPED' || (task?.startAt && new Date(task.startAt).getTime() < Date.now());
       const payload = {
-        title: task?.title ? `${task.title} (copia)` : 'Tarea replicada',
+        title: `Task #${nextReplicaNumber}`,
         description: task?.description || undefined,
         startAt: shouldUseNow ? nowSafeIso : originalStart,
         durationMinutes: Number(task?.durationMinutes || 30) || 30,
@@ -1000,6 +1233,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
   function renderTaskFilterChips(){ const hostId='task-filter-chips'; let host=document.getElementById(hostId); if (!host){ host=document.createElement('div'); host.id=hostId; host.style.margin='6px 0 10px'; const ref=document.querySelector('#tasks-section .filters-row'); if (ref && ref.parentElement) ref.parentElement.insertBefore(host, ref.nextSibling); }
     host.innerHTML='';
+    const q=(tasksSearchAnyInput?.value||'').trim(); if (q){ host.appendChild(createChip('Buscar: '+q, ()=>{ tasksSearchAnyInput.value=''; applyTaskFilters(); })); }
     const minDur=(tasksMinDurInput?.value||'').trim(); if (minDur){ host.appendChild(createChip('Min: '+minDur+' min', ()=>{ tasksMinDurInput.value=''; applyTaskFilters(); })); }
     const status=(tasksStatusSel?.value||'').trim(); if (status){ host.appendChild(createChip('Estado: '+status.replace('_',' '), ()=>{ tasksStatusSel.value=''; applyTaskFilters(); })); }
     const tags=(tasksTagFilterInput?.value||'').trim(); if (tags){ host.appendChild(createChip('Tags: '+tags, ()=>{ tasksTagFilterInput.value=''; applyTaskFilters(); })); }
@@ -1134,93 +1368,11 @@ document.addEventListener('DOMContentLoaded', () => {
 
   // Task creation modal
   if (taskCreateToggle) {
-    taskCreateToggle.addEventListener('click', () => {
-      showFormModal({
-        title: 'Nueva tarea',
-        fields: [
-          { id: 'title', label: 'Título', type: 'text', value: '' },
-          { id: 'description', label: 'Descripción (opcional)', type: 'textarea', rows: 3, value: '' },
-          { id: 'startAt', label: 'Inicio', type: 'datetime-local', value: '' },
-          { id: 'durationMinutes', label: 'Duración (minutos)', type: 'number', value: '' },
-          { id: 'tags', label: 'Tags (separados por coma)', type: 'text', value: '' },
-          // Estado como combobox
-          { id: 'status', label: 'Estado', type: 'select', value: 'IN_PROGRESS', options: [
-            { label: 'En progreso', value: 'IN_PROGRESS' },
-            { label: 'Pausada', value: 'PAUSED' },
-            { label: 'Detenido', value: 'STOPPED' },
-            { label: 'Completada', value: 'COMPLETED' }
-          ] }
-        ],
-        onSubmit: async (values) => {
-          const payload = {
-            title: values.title || '',
-            description: values.description || undefined,
-            startAt: values.startAt || new Date().toISOString(),
-            durationMinutes: values.durationMinutes ? parseInt(values.durationMinutes, 10) : 30,
-            tags: (values.tags || '').split(',').map(t => t.trim()).filter(Boolean),
-            status: values.status || undefined,
-          };
-          try {
-            const res = await fetch('/tasks', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
-            if (!res.ok) throw new Error(await res.text());
-            showToast('Tarea creada', 'success');
-            await fetchTasks(true);
-            await showMessageModal('Tarea creada correctamente', { title: 'Nueva tarea' });
-          } catch (err) {
-            console.error(err);
-            await showMessageModal('No se pudo crear la tarea', { title: 'Error' });
-          }
-        }
-      });
-      const overlay = document.getElementById('form-overlay');
-      const bodyEl = overlay?.querySelector('#form-body');
-      if (bodyEl) { bodyEl.querySelectorAll('input, textarea').forEach(el => { el.style.background='#0b1220'; el.style.color='#e5e7eb'; el.style.border='1px solid #334155'; el.style.borderRadius='8px'; el.style.padding='8px 10px'; }); }
-
-      const startInput = overlay?.querySelector('#startAt');
-      const durationInput = overlay?.querySelector('#durationMinutes');
-      const startRow = startInput?.parentElement?.parentElement;
-      if (startRow && startInput && durationInput) {
-        let hint = startRow.querySelector('.task-overlap-hint');
-        if (!hint) {
-          hint = document.createElement('div');
-          hint.className = 'task-overlap-hint';
-          hint.style.marginTop = '8px';
-          hint.style.padding = '8px 10px';
-          hint.style.borderRadius = '8px';
-          hint.style.fontSize = '12px';
-          hint.style.fontWeight = '700';
-          startRow.appendChild(hint);
-        }
-        const renderOverlapHint = () => {
-          const overlap = findTaskOverlap(startInput.value, parseInt(durationInput.value || '0', 10));
-          if (overlap) {
-            hint.textContent = `Horario ocupado por: ${overlap.title || 'Tarea'} (${formatDateTime(overlap.startAt)})`;
-            hint.style.background = 'rgba(239,68,68,0.16)';
-            hint.style.border = '1px solid rgba(239,68,68,0.35)';
-            hint.style.color = '#fecaca';
-          } else if (!startInput.value || !durationInput.value) {
-            hint.textContent = 'Define inicio y duración para validar disponibilidad.';
-            hint.style.background = 'rgba(59,130,246,0.12)';
-            hint.style.border = '1px solid rgba(59,130,246,0.35)';
-            hint.style.color = '#bfdbfe';
-          } else {
-            hint.textContent = 'Horario disponible.';
-            hint.style.background = 'rgba(16,185,129,0.14)';
-            hint.style.border = '1px solid rgba(16,185,129,0.35)';
-            hint.style.color = '#a7f3d0';
-          }
-        };
-        startInput.addEventListener('input', renderOverlapHint);
-        startInput.addEventListener('change', renderOverlapHint);
-        durationInput.addEventListener('input', renderOverlapHint);
-        durationInput.addEventListener('change', renderOverlapHint);
-        renderOverlapHint();
-      }
-    });
+    taskCreateToggle.addEventListener('click', () => openTaskCreateModal());
   }
 
   // Filters wiring
-  tasksRefreshBtn?.addEventListener('click', () => { tasksMinDurInput && (tasksMinDurInput.value = ''); tasksStatusSel && (tasksStatusSel.value = ''); tasksTagFilterInput && (tasksTagFilterInput.value = ''); tasksSortSel && (tasksSortSel.value = 'all'); tasksDateFrom && (tasksDateFrom.value = ''); tasksDateTo && (tasksDateTo.value = ''); applyTaskFilters(); });
+  tasksRefreshBtn?.addEventListener('click', () => { tasksMinDurInput && (tasksMinDurInput.value = ''); tasksStatusSel && (tasksStatusSel.value = ''); tasksTagFilterInput && (tasksTagFilterInput.value = ''); tasksSearchAnyInput && (tasksSearchAnyInput.value = ''); tasksSortSel && (tasksSortSel.value = 'all'); tasksDateFrom && (tasksDateFrom.value = ''); tasksDateTo && (tasksDateTo.value = ''); applyTaskFilters(); });
   tasksSortSel?.addEventListener('change', applyTaskFilters);
   tasksMinDurInput?.addEventListener('input', applyTaskFilters);
   tasksStatusSel?.addEventListener('change', applyTaskFilters);
@@ -1287,6 +1439,112 @@ document.addEventListener('DOMContentLoaded', () => {
     calModal.style.display = 'flex';
   }
   function closeTasksCalendar(){ if (calModal) calModal.style.display = 'none'; }
+  function minutesToHHmm(mins){
+    const h = Math.floor(mins / 60);
+    const m = mins % 60;
+    return `${pad2(h)}:${pad2(m)}`;
+  }
+  function getAvailableSlotsForDay(dayDate, tasks){
+    const workStart = 8 * 60;
+    const workEnd = 23 * 60;
+    const slotSize = 60; // bloques de 1h
+    const busy = (tasks || [])
+      .filter(t => t?.startAt)
+      .map(t => {
+        const s = new Date(t.startAt);
+        const start = s.getHours() * 60 + s.getMinutes();
+        const dur = Number(t.durationMinutes || 60) || 60;
+        return { start, end: start + dur };
+      })
+      .sort((a,b)=>a.start-b.start);
+    const free = [];
+    for (let cursor = workStart; cursor + slotSize <= workEnd; cursor += slotSize){
+      const end = cursor + slotSize;
+      const overlaps = busy.some(b => cursor < b.end && end > b.start);
+      if (!overlaps) free.push({ start: cursor, end });
+    }
+    return free;
+  }
+  function showAvailabilityModal(dayDate, dayTasks){
+    let overlay = document.getElementById('availability-overlay');
+    if (!overlay) {
+      overlay = document.createElement('div');
+      overlay.id = 'availability-overlay';
+      overlay.style.position = 'fixed';
+      overlay.style.inset = '0';
+      overlay.style.background = 'rgba(2,6,23,0.74)';
+      overlay.style.backdropFilter = 'blur(3px)';
+      overlay.style.display = 'none';
+      overlay.style.alignItems = 'center';
+      overlay.style.justifyContent = 'center';
+      overlay.style.zIndex = '10007';
+      overlay.innerHTML = `
+        <div style="width:min(760px,92vw); max-height:86vh; overflow:auto; background:#020617; border:1px solid #0ea5e9; border-radius:14px; box-shadow:0 22px 60px rgba(0,0,0,0.6), 0 0 0 1px rgba(125,211,252,0.2) inset; padding:14px;">
+          <div style="display:flex; align-items:center; justify-content:space-between; gap:8px; margin-bottom:10px;">
+            <strong id="availability-title" style="color:#e2e8f0;">Horarios disponibles</strong>
+            <button id="availability-close" class="btn btn-danger" type="button">Cerrar</button>
+          </div>
+          <div id="availability-content"></div>
+        </div>`;
+      document.body.appendChild(overlay);
+      overlay.addEventListener('click', (e)=>{ if (e.target === overlay) overlay.style.display = 'none'; });
+      overlay.querySelector('#availability-close')?.addEventListener('click', ()=>{ overlay.style.display = 'none'; });
+    }
+    const titleEl = overlay.querySelector('#availability-title');
+    const contentEl = overlay.querySelector('#availability-content');
+    const dateTxt = new Intl.DateTimeFormat('es-CL', { weekday:'long', day:'2-digit', month:'long', year:'numeric' }).format(dayDate);
+    if (titleEl) titleEl.textContent = `Horarios disponibles — ${capitalize(dateTxt)}`;
+    const free = getAvailableSlotsForDay(dayDate, dayTasks);
+    if (contentEl) {
+      const dayKey = localDateKey(dayDate);
+      const startOfDay = `${dayKey}T00:00`;
+      const dayTasksSorted = [...(dayTasks || [])].sort((a,b)=>new Date(a.startAt)-new Date(b.startAt));
+      const freeHtml = free.length
+        ? free.map((s, idx) => `<button type="button" class="availability-slot-btn" data-slot-start="${dayKey}T${minutesToHHmm(s.start)}" data-slot-duration="${s.end - s.start}" style="display:inline-flex; align-items:center; justify-content:center; min-width:130px; padding:8px 10px; border-radius:999px; border:1px solid rgba(56,189,248,0.55); background:linear-gradient(135deg,rgba(14,116,144,0.26),rgba(30,64,175,0.22)); color:#e0f2fe; font-weight:700; cursor:pointer;">${minutesToHHmm(s.start)} - ${minutesToHHmm(s.end)}</button>`).join('')
+        : `<div style="padding:12px; border:1px solid #7c2d12; border-radius:10px; background:rgba(127,29,29,0.2); color:#fecaca;">Sin bloques libres de 1 hora para este día.</div>`;
+      const tasksHtml = dayTasksSorted.length
+        ? dayTasksSorted.map((t) => `<div style="display:flex; align-items:center; justify-content:space-between; gap:10px; padding:8px 10px; border:1px solid #1f2937; border-radius:10px; background:#0b1220; margin-top:8px;">
+            <div style="color:#cbd5e1; font-size:13px;">
+              <strong class="censor-title">${escapeHtml(t.title || 'Tarea')}</strong><br/>
+              <small style="color:#93c5fd;">${pad2(new Date(t.startAt).getHours())}:${pad2(new Date(t.startAt).getMinutes())} · ${Number(t.durationMinutes || 0) || 0} min</small>
+            </div>
+            <button type="button" class="availability-edit-btn btn btn-primary" data-task-id="${t.id}" title="Editar tarea">✏️</button>
+          </div>`).join('')
+        : `<div style="padding:10px; border:1px dashed #334155; border-radius:10px; color:#94a3b8;">No hay tareas creadas este día.</div>`;
+      contentEl.innerHTML = `
+        <div style="margin-bottom:10px;">
+          <div style="color:#e2e8f0; font-weight:700; margin-bottom:8px;">Crear tarea inmediata</div>
+          <div style="display:flex; flex-wrap:wrap; gap:8px;">${freeHtml}</div>
+        </div>
+        <div style="margin-top:10px;">
+          <div style="color:#e2e8f0; font-weight:700; margin-bottom:8px;">Tareas del día</div>
+          ${tasksHtml}
+          <button type="button" id="availability-create-day-btn" class="btn btn-success" style="margin-top:10px;">+ Nueva tarea este día</button>
+        </div>`;
+      contentEl.querySelectorAll('.availability-slot-btn').forEach((btn) => {
+        btn.addEventListener('click', () => {
+          const startAt = btn.getAttribute('data-slot-start') || startOfDay;
+          const dur = parseInt(btn.getAttribute('data-slot-duration') || '60', 10) || 60;
+          overlay.style.display = 'none';
+          openTaskCreateModal({ startAt, durationMinutes: dur, status: 'IN_PROGRESS' });
+        });
+      });
+      contentEl.querySelectorAll('.availability-edit-btn').forEach((btn) => {
+        btn.addEventListener('click', () => {
+          const id = Number(btn.getAttribute('data-task-id'));
+          const task = (allTasks || []).find((t) => Number(t.id) === id);
+          if (!task) return;
+          overlay.style.display = 'none';
+          openTaskEditModal(task);
+        });
+      });
+      contentEl.querySelector('#availability-create-day-btn')?.addEventListener('click', () => {
+        overlay.style.display = 'none';
+        openTaskCreateModal({ startAt: startOfDay, durationMinutes: 60, status: 'IN_PROGRESS' });
+      });
+    }
+    overlay.style.display = 'flex';
+  }
 
   function renderCalendar(){
     if (!calGrid || !calHeader) return;
@@ -1312,7 +1570,15 @@ document.addEventListener('DOMContentLoaded', () => {
       cell.style.maxHeight = '240px';
       cell.style.overflowY = 'auto';
       cell.style.overflowX = 'hidden';
-      const header = document.createElement('div'); header.textContent = String(d); header.style.fontWeight='700'; header.style.color='#e5e7eb'; cell.appendChild(header);
+      const header = document.createElement('div');
+      header.style.display = 'flex';
+      header.style.alignItems = 'center';
+      header.style.justifyContent = 'space-between';
+      const dayNum = document.createElement('span');
+      dayNum.textContent = String(d);
+      dayNum.style.fontWeight = '700';
+      dayNum.style.color = '#e5e7eb';
+      header.appendChild(dayNum);
       const isPast = date < today;
       if (isPast){ cell.style.background='#7c2d12'; cell.style.borderColor='#f59e0b'; }
       else { cell.style.background='#0b2a5b'; cell.style.borderColor='#3b82f6'; }
@@ -1322,11 +1588,53 @@ document.addEventListener('DOMContentLoaded', () => {
         const ts = new Date(t.startAt);
         return ts.getFullYear() === date.getFullYear() && ts.getMonth() === date.getMonth() && ts.getDate() === date.getDate();
       }).sort((a,b)=>new Date(a.startAt) - new Date(b.startAt));
+      if (dayTasks.length > 0) {
+        const countBadge = document.createElement('span');
+        countBadge.textContent = String(dayTasks.length);
+        countBadge.title = `${dayTasks.length} tarea${dayTasks.length === 1 ? '' : 's'}`;
+        countBadge.style.minWidth = '22px';
+        countBadge.style.height = '22px';
+        countBadge.style.borderRadius = '999px';
+        countBadge.style.display = 'inline-flex';
+        countBadge.style.alignItems = 'center';
+        countBadge.style.justifyContent = 'center';
+        countBadge.style.fontSize = '12px';
+        countBadge.style.fontWeight = '800';
+        countBadge.style.color = '#f8fafc';
+        countBadge.style.background = 'linear-gradient(135deg,#06b6d4,#2563eb)';
+        countBadge.style.border = '1px solid rgba(186,230,253,0.6)';
+        countBadge.style.boxShadow = '0 6px 14px rgba(2,132,199,0.35)';
+        header.appendChild(countBadge);
+      }
+      cell.appendChild(header);
+      if (!isPast) {
+        const freeBtn = document.createElement('button');
+        freeBtn.type = 'button';
+        freeBtn.textContent = 'Horarios disponibles';
+        freeBtn.className = 'btn btn-primary';
+        freeBtn.style.marginTop = '6px';
+        freeBtn.style.padding = '4px 8px';
+        freeBtn.style.fontSize = '11px';
+        freeBtn.style.borderRadius = '8px';
+        freeBtn.style.width = '100%';
+        freeBtn.style.background = 'linear-gradient(135deg,#06b6d4,#2563eb)';
+        freeBtn.style.border = '1px solid rgba(186,230,253,0.55)';
+        freeBtn.addEventListener('click', (e) => {
+          e.preventDefault();
+          e.stopPropagation();
+          showAvailabilityModal(date, dayTasks);
+        });
+        cell.appendChild(freeBtn);
+      }
 
       dayTasks.forEach(t => {
         const item = document.createElement('div');
         item.className = 'card';
-        item.style.marginTop='4px'; item.style.fontSize='12px'; item.style.fontWeight='600'; item.style.borderRadius='6px'; item.style.padding='2px 6px';
+        item.style.marginTop='4px'; item.style.fontSize='12px'; item.style.fontWeight='600'; item.style.borderRadius='6px'; item.style.padding='4px 6px';
+        item.style.display = 'flex';
+        item.style.alignItems = 'center';
+        item.style.justifyContent = 'space-between';
+        item.style.gap = '6px';
         // Color según estado
         if (String(t.status) === 'COMPLETED') {
           item.style.color = '#d1fae5';           // text: emerald-100
@@ -1341,7 +1649,25 @@ document.addEventListener('DOMContentLoaded', () => {
           item.style.background = 'rgba(59,130,246,0.18)';
           item.style.border = '1px solid rgba(59,130,246,0.35)';
         }
-        item.innerHTML = `${pad2(new Date(t.startAt).getHours())}:${pad2(new Date(t.startAt).getMinutes())} <span class="censor-title">${escapeHtml(t.title)}</span>`;
+        const left = document.createElement('div');
+        left.innerHTML = `${pad2(new Date(t.startAt).getHours())}:${pad2(new Date(t.startAt).getMinutes())} <span class="censor-title">${escapeHtml(t.title)}</span> <small style="opacity:.9;">(${Number(t.durationMinutes || 0) || 0}m)</small>`;
+        left.style.minWidth = '0';
+        left.style.wordBreak = 'break-word';
+        const editBtn = document.createElement('button');
+        editBtn.type = 'button';
+        editBtn.textContent = '✏️';
+        editBtn.title = 'Editar tarea';
+        editBtn.className = 'btn btn-primary';
+        editBtn.style.padding = '2px 6px';
+        editBtn.style.fontSize = '11px';
+        editBtn.style.borderRadius = '6px';
+        editBtn.addEventListener('click', (e) => {
+          e.preventDefault();
+          e.stopPropagation();
+          openTaskEditModal(t);
+        });
+        item.appendChild(left);
+        item.appendChild(editBtn);
         cell.appendChild(item);
       });
 
@@ -1710,6 +2036,7 @@ document.addEventListener('DOMContentLoaded', () => {
   }
 
   function applyPaymentsFilters(){
+    const q = (paymentsSearchAnyInput?.value || '').trim().toLowerCase();
     const bank = paymentsBankSel?.value || '';
     const type = paymentsTypeSel?.value || '';
     const status = paymentsStatusSel?.value || '';
@@ -1717,6 +2044,22 @@ document.addEventListener('DOMContentLoaded', () => {
     const from = paymentsDateFrom?.value || '';
     const to = paymentsDateTo?.value || '';
     filteredPayments = allPayments.filter(p => {
+      if (q) {
+        const haystack = [
+          p?.id,
+          p?.title,
+          p?.bank,
+          p?.type,
+          p?.status,
+          p?.month,
+          p?.amount,
+          p?.createdAt,
+          p?.updatedAt,
+          p?.installments,
+          p?.paidInstallments,
+        ].map(v => String(v || '').toLowerCase()).join(' ');
+        if (!haystack.includes(q)) return false;
+      }
       if (bank && p.bank !== bank) return false;
       if (type && p.type !== type) return false;
       if (status && p.status !== status) return false;
@@ -1749,6 +2092,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
   function renderPaymentFilterChips(){ const hostId='payments-filter-chips'; let host=document.getElementById(hostId); if (!host){ host=document.createElement('div'); host.id=hostId; host.style.margin='6px 0 10px'; const ref=document.querySelector('#payments-section .filters-row'); if (ref && ref.parentElement) ref.parentElement.insertBefore(host, ref.nextSibling); }
     host.innerHTML='';
+    const q=(paymentsSearchAnyInput?.value||'').trim(); if (q){ host.appendChild(createChip('Buscar: '+q, ()=>{ paymentsSearchAnyInput.value=''; applyPaymentsFilters(); })); }
     const bank=(paymentsBankSel?.value||'').trim(); if (bank){ host.appendChild(createChip('Banco: '+bank, ()=>{ paymentsBankSel.value=''; applyPaymentsFilters(); })); }
     const type=(paymentsTypeSel?.value||'').trim(); if (type){ host.appendChild(createChip('Tipo: '+type, ()=>{ paymentsTypeSel.value=''; applyPaymentsFilters(); })); }
     const status=(paymentsStatusSel?.value||'').trim(); if (status){ host.appendChild(createChip('Estado: '+status, ()=>{ paymentsStatusSel.value=''; applyPaymentsFilters(); })); }
@@ -1776,7 +2120,7 @@ document.addEventListener('DOMContentLoaded', () => {
   }
 
   // Wire filters
-  paymentsRefreshBtn?.addEventListener('click', ()=>{ paymentsBankSel && (paymentsBankSel.value=''); paymentsTypeSel && (paymentsTypeSel.value=''); paymentsStatusSel && (paymentsStatusSel.value=''); paymentsMonthInput && (paymentsMonthInput.value=''); applyPaymentsFilters(); });
+  paymentsRefreshBtn?.addEventListener('click', ()=>{ paymentsBankSel && (paymentsBankSel.value=''); paymentsTypeSel && (paymentsTypeSel.value=''); paymentsStatusSel && (paymentsStatusSel.value=''); paymentsMonthInput && (paymentsMonthInput.value=''); paymentsSearchAnyInput && (paymentsSearchAnyInput.value=''); applyPaymentsFilters(); });
   paymentsBankSel?.addEventListener('change', applyPaymentsFilters);
   paymentsTypeSel?.addEventListener('change', applyPaymentsFilters);
   paymentsStatusSel?.addEventListener('change', applyPaymentsFilters);
@@ -1787,9 +2131,10 @@ document.addEventListener('DOMContentLoaded', () => {
   paymentsPagePrev?.addEventListener('click', ()=>{ paymentsPage = Math.max(1, paymentsPage - 1); renderPaymentsPage(); });
   paymentsPageNext?.addEventListener('click', ()=>{ paymentsPage = paymentsPage + 1; renderPaymentsPage(); });
   paymentsPageSizeSel?.addEventListener('change', ()=>{ paymentsPageSize = parseInt(paymentsPageSizeSel.value || '10', 10) || 10; paymentsPage = 1; renderPaymentsPage(); });
+  paymentsSearchAnyInput?.addEventListener('input', applyPaymentsFilters);
 
   // Month picker buttons
-  paymentsMonthBtn?.addEventListener('click', ()=>{ try { if (paymentsMonthInput && typeof paymentsMonthInput.showPicker==='function') paymentsMonthInput.showPicker(); else paymentsMonthInput?.focus(); } catch { paymentsMonthInput?.focus(); } });
+  paymentsMonthBtn?.addEventListener('click', ()=>{ paymentsMonthInput?.focus(); });
 
   // Clear month filter
   const paymentsMonthClear = document.getElementById('payments-month-clear');
@@ -1862,33 +2207,36 @@ document.addEventListener('DOMContentLoaded', () => {
       wrap.style.display = 'inline-flex';
       wrap.style.alignItems = 'center';
       wrap.style.gap = '8px';
-      wrap.style.background = '#0b1220';
-      wrap.style.border = '1px solid #334155';
-      wrap.style.borderRadius = '10px';
-      wrap.style.padding = '6px 8px';
-      wrap.style.boxShadow = '0 6px 18px rgba(0,0,0,0.3)';
+      wrap.style.background = 'linear-gradient(135deg, rgba(14,116,144,0.22), rgba(30,64,175,0.16) 45%, rgba(11,18,32,0.98) 100%)';
+      wrap.style.border = '1px solid #0ea5e9';
+      wrap.style.borderRadius = '12px';
+      wrap.style.padding = '7px 9px';
+      wrap.style.boxShadow = '0 8px 22px rgba(2,132,199,0.25), 0 0 0 1px rgba(125,211,252,0.25) inset';
       // Insertar antes del input y mover elementos dentro
       const parent = paymentsMonthInput.parentElement;
       if (parent) {
         parent.insertBefore(wrap, paymentsMonthInput);
         wrap.appendChild(paymentsMonthInput);
         // Estilos del input
-        paymentsMonthInput.style.background = '#0b1220';
-        paymentsMonthInput.style.color = '#e5e7eb';
+        paymentsMonthInput.style.background = 'rgba(2,6,23,0.55)';
+        paymentsMonthInput.style.color = '#f0f9ff';
         paymentsMonthInput.style.border = 'none';
         paymentsMonthInput.style.outline = 'none';
-        paymentsMonthInput.style.padding = '4px 6px';
-        paymentsMonthInput.style.borderRadius = '8px';
+        paymentsMonthInput.style.padding = '8px 10px';
+        paymentsMonthInput.style.borderRadius = '9px';
+        paymentsMonthInput.style.fontWeight = '700';
         paymentsMonthInput.style.minWidth = '130px';
+        paymentsMonthInput.addEventListener('focus', ()=>{ wrap.style.transform='translateY(-1px)'; wrap.style.boxShadow='0 10px 24px rgba(2,132,199,0.35), 0 0 0 1px rgba(125,211,252,0.35) inset'; });
+        paymentsMonthInput.addEventListener('blur', ()=>{ wrap.style.transform='none'; wrap.style.boxShadow='0 8px 22px rgba(2,132,199,0.25), 0 0 0 1px rgba(125,211,252,0.25) inset'; });
         // Botón 📅 estilizado
         if (paymentsMonthBtn) {
-          paymentsMonthBtn.style.background = '#3b82f6';
+          paymentsMonthBtn.style.background = 'linear-gradient(135deg,#06b6d4,#3b82f6)';
           paymentsMonthBtn.style.color = '#fff';
-          paymentsMonthBtn.style.border = 'none';
-          paymentsMonthBtn.style.borderRadius = '8px';
-          paymentsMonthBtn.style.padding = '6px 8px';
+          paymentsMonthBtn.style.border = '1px solid rgba(186,230,253,0.55)';
+          paymentsMonthBtn.style.borderRadius = '10px';
+          paymentsMonthBtn.style.padding = '8px 10px';
           paymentsMonthBtn.style.cursor = 'pointer';
-          paymentsMonthBtn.style.boxShadow = '0 4px 12px rgba(0,0,0,0.25)';
+          paymentsMonthBtn.style.boxShadow = '0 8px 16px rgba(37,99,235,0.35)';
           wrap.appendChild(paymentsMonthBtn);
         }
         // Botón limpiar dentro del wrap si existe
@@ -1921,6 +2269,7 @@ document.addEventListener('DOMContentLoaded', () => {
   makeSelectSearchable(paymentsBankSel);
   makeSelectSearchable(paymentsTypeSel);
   makeSelectSearchable(paymentsStatusSel);
+  wireStaticFlatpickrInputs();
 
   // Toast utility
   function showToast(message, kind = 'neutral', timeout = 2500){
@@ -1947,6 +2296,7 @@ document.addEventListener('DOMContentLoaded', () => {
     const notesPageNext2 = document.getElementById('notes-page-next');
     const notesPageInfo2 = document.getElementById('notes-page-info');
     const notesPageSizeSel2 = document.getElementById('notes-page-size');
+    const notesSearchAnyInput2 = document.getElementById('notes-search-any');
     let allNotes2 = [];
     let notesPage2 = 1;
     let notesPageSize2 = 10;
@@ -1967,11 +2317,27 @@ document.addEventListener('DOMContentLoaded', () => {
       renderNotesPage();
     }
     function saveNotes(){ localStorage.setItem('quick_notes_v1', JSON.stringify(allNotes2)); }
+    function getFilteredNotes(){
+      const q = String(notesSearchAnyInput2?.value || '').trim().toLowerCase();
+      if (!q) return allNotes2;
+      return allNotes2.filter((n) => {
+        const haystack = [
+          n?.id,
+          n?.title,
+          n?.content,
+          n?.language,
+          Array.isArray(n?.tags) ? n.tags.join(' ') : String(n?.tags || ''),
+          n?.createdAt,
+        ].map(v => String(v || '').toLowerCase()).join(' ');
+        return haystack.includes(q);
+      });
+    }
     function renderNotesPage(){
-      const total = allNotes2.length; const pages = Math.max(1, Math.ceil(total / notesPageSize2));
+      const filtered = getFilteredNotes();
+      const total = filtered.length; const pages = Math.max(1, Math.ceil(total / notesPageSize2));
       notesPage2 = Math.min(Math.max(1, notesPage2), pages);
       const start = (notesPage2 - 1) * notesPageSize2;
-      const slice = allNotes2.slice(start, start + notesPageSize2);
+      const slice = filtered.slice(start, start + notesPageSize2);
       renderNotes(slice);
       if (notesPageInfo2) notesPageInfo2.textContent = `Página ${notesPage2} de ${pages} · ${total} ítems`;
       if (notesPagePrev2) notesPagePrev2.disabled = notesPage2 <= 1;
@@ -2168,6 +2534,7 @@ document.addEventListener('DOMContentLoaded', () => {
     notesPagePrev2?.addEventListener('click', ()=>{ notesPage2 = Math.max(1, notesPage2 - 1); renderNotesPage(); });
     notesPageNext2?.addEventListener('click', ()=>{ notesPage2 = notesPage2 + 1; renderNotesPage(); });
     notesPageSizeSel2?.addEventListener('change', ()=>{ notesPageSize2 = parseInt(notesPageSizeSel2.value || '10', 10) || 10; notesPage2 = 1; renderNotesPage(); });
+    notesSearchAnyInput2?.addEventListener('input', ()=>{ notesPage2 = 1; renderNotesPage(); });
 
     // Inicializar
     loadNotes();
