@@ -1,6 +1,7 @@
 document.addEventListener('DOMContentLoaded', () => {
   const listEl = document.getElementById('errors');
-  const ipEl = document.getElementById('ip');
+  const ipV4El = document.getElementById('ip-v4');
+  const ipV6El = document.getElementById('ip-v6');
   const timeLocalEl = document.getElementById('time-local');
   const timeSantiagoEl = document.getElementById('time-santiago');
   const usdClpEl = document.getElementById('usd-clp');
@@ -264,15 +265,19 @@ document.addEventListener('DOMContentLoaded', () => {
   }
 
   async function fetchIP() {
-    if (!ipEl) return;
+    if (!ipV4El && !ipV6El) return;
     try {
-      const res = await fetch('https://api.ipify.org?format=json');
+      const res = await fetch('/network/private-ip');
       if (!res.ok) throw new Error('no response');
       const data = await res.json();
-      ipEl.textContent = data.ip || 'no disponible';
+      const ipv4 = Array.isArray(data?.ipv4) ? data.ipv4 : [];
+      const ipv6 = Array.isArray(data?.ipv6) ? data.ipv6 : [];
+      if (ipV4El) ipV4El.textContent = ipv4.length ? ipv4.join(' · ') : 'no disponible';
+      if (ipV6El) ipV6El.textContent = ipv6.length ? ipv6.join(' · ') : 'no disponible';
     } catch (err) {
       console.error('fetchIP error', err);
-      ipEl.textContent = 'no disponible';
+      if (ipV4El) ipV4El.textContent = 'no disponible';
+      if (ipV6El) ipV6El.textContent = 'no disponible';
     }
   }
   async function fetchUsdRates() {
@@ -1439,6 +1444,27 @@ document.addEventListener('DOMContentLoaded', () => {
     calModal.style.display = 'flex';
   }
   function closeTasksCalendar(){ if (calModal) calModal.style.display = 'none'; }
+  async function moveTaskToCalendarDay(taskId, targetDate){
+    const task = (allTasks || []).find(t => Number(t.id) === Number(taskId));
+    if (!task || !task.startAt) return;
+    const src = new Date(task.startAt);
+    const next = new Date(targetDate);
+    next.setHours(src.getHours(), src.getMinutes(), 0, 0);
+    try {
+      const res = await fetch('/tasks/' + task.id, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ startAt: next.toISOString() }),
+      });
+      if (!res.ok) throw new Error(await res.text());
+      showToast('Tarea movida', 'success');
+      await fetchTasks(true);
+      renderCalendar();
+    } catch (err) {
+      console.error(err);
+      await showMessageModal('No se pudo mover la tarea a ese día', { title: 'Error' });
+    }
+  }
   function minutesToHHmm(mins){
     const h = Math.floor(mins / 60);
     const m = mins % 60;
@@ -1570,6 +1596,7 @@ document.addEventListener('DOMContentLoaded', () => {
       cell.style.maxHeight = '240px';
       cell.style.overflowY = 'auto';
       cell.style.overflowX = 'hidden';
+      cell.dataset.dateKey = localDateKey(date);
       const header = document.createElement('div');
       header.style.display = 'flex';
       header.style.alignItems = 'center';
@@ -1626,6 +1653,20 @@ document.addEventListener('DOMContentLoaded', () => {
         });
         cell.appendChild(freeBtn);
       }
+      cell.addEventListener('dragover', (e) => {
+        e.preventDefault();
+        cell.style.outline = '2px dashed rgba(56,189,248,0.8)';
+      });
+      cell.addEventListener('dragleave', () => {
+        cell.style.outline = 'none';
+      });
+      cell.addEventListener('drop', async (e) => {
+        e.preventDefault();
+        cell.style.outline = 'none';
+        const taskId = e.dataTransfer?.getData('text/task-id');
+        if (!taskId) return;
+        await moveTaskToCalendarDay(taskId, date);
+      });
 
       dayTasks.forEach(t => {
         const item = document.createElement('div');
@@ -1635,6 +1676,18 @@ document.addEventListener('DOMContentLoaded', () => {
         item.style.alignItems = 'center';
         item.style.justifyContent = 'space-between';
         item.style.gap = '6px';
+        item.draggable = true;
+        item.style.cursor = 'grab';
+        item.addEventListener('dragstart', (e) => {
+          item.style.opacity = '0.65';
+          if (e.dataTransfer) {
+            e.dataTransfer.setData('text/task-id', String(t.id));
+            e.dataTransfer.effectAllowed = 'move';
+          }
+        });
+        item.addEventListener('dragend', () => {
+          item.style.opacity = '1';
+        });
         // Color según estado
         if (String(t.status) === 'COMPLETED') {
           item.style.color = '#d1fae5';           // text: emerald-100

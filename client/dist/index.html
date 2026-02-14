@@ -77,6 +77,38 @@
       .btn.btn-primary { background: #3b82f6 !important; color: #fff !important; }
       .btn.btn-neutral { background: #6b7280 !important; color: #fff !important; }
 
+      /* Client info layout */
+      #client-info {
+        margin-bottom: 14px;
+        padding: 12px;
+        border: 1px solid #164e63;
+        border-radius: 14px;
+        background: linear-gradient(180deg, rgba(3,12,28,0.95), rgba(2,6,23,0.98));
+        box-shadow: 0 14px 34px rgba(0,0,0,0.4), 0 0 0 1px rgba(56,189,248,0.16) inset;
+      }
+      .client-grid {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+        gap: 10px;
+      }
+      .client-item {
+        border: 1px solid #1e3a8a;
+        border-radius: 10px;
+        background: linear-gradient(180deg, #0b1220, #070f1e);
+        padding: 10px;
+      }
+      .client-item .k {
+        display: block;
+        color: #93c5fd;
+        font-size: 12px;
+        margin-bottom: 4px;
+      }
+      .client-item .v {
+        color: #e2e8f0;
+        font-weight: 800;
+        letter-spacing: .2px;
+      }
+
       /* Global form look */
       form {
         background: linear-gradient(180deg, rgba(3, 12, 28, 0.95), rgba(2, 6, 23, 0.98));
@@ -175,12 +207,18 @@
 
       <!-- Información: IP y relojes -->
       <div id="client-info">
-        <div><strong>Tu IP:</strong> <span id="ip">cargando...</span></div>
-        <div><strong>Hora local:</strong> <span id="time-local">--:--:--</span></div>
-        <div><strong>Hora Santiago de Chile:</strong> <span id="time-santiago">--:--:--</span></div>
-        <div><strong>Dólar (USD → CLP):</strong> <span id="usd-clp">cargando...</span></div>
-        <div><strong>Dólar (USD → BRL):</strong> <span id="usd-brl">cargando...</span></div>
-        <div style="margin-top:8px; padding:10px; border:1px solid #334155; border-radius:10px; background:#0b1220;">
+        <div class="client-grid">
+          <div class="client-item">
+            <span class="k">IP Privada</span>
+            <span class="v">IPv4: <span id="ip-v4">cargando...</span></span>
+            <span class="v" style="display:block; margin-top:3px;">IPv6: <span id="ip-v6">cargando...</span></span>
+          </div>
+          <div class="client-item"><span class="k">Hora Local</span><span class="v" id="time-local">--:--:--</span></div>
+          <div class="client-item"><span class="k">Hora Santiago (CL)</span><span class="v" id="time-santiago">--:--:--</span></div>
+          <div class="client-item"><span class="k">USD → CLP</span><span class="v" id="usd-clp">cargando...</span></div>
+          <div class="client-item"><span class="k">USD → BRL</span><span class="v" id="usd-brl">cargando...</span></div>
+        </div>
+        <div style="margin-top:10px; padding:10px; border:1px solid #1e3a8a; border-radius:10px; background:linear-gradient(180deg,#0b1220,#070f1e);">
           <div style="display:flex; align-items:center; gap:8px; flex-wrap:wrap; margin-bottom:8px;">
             <strong>Conversor:</strong>
             <input id="fx-amount-input" type="number" step="0.01" min="0" placeholder="Escribe un monto" class="input" style="max-width:180px;" />
