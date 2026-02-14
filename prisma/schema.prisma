@@ -95,3 +95,13 @@ model Note {
   tags      String   // coma separada
   createdAt DateTime @default(now())
 }
+
+model User {
+  id           Int      @id @default(autoincrement())
+  email        String   @unique
+  username     String?  @unique
+  passwordHash String
+  isActive     Boolean  @default(true)
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+}

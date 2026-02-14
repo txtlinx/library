@@ -4,6 +4,9 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width,initial-scale=1" />
     <title>Error Library - Front</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700;800&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="/style.css">
     <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/flatpickr/dist/flatpickr.min.css">
     <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/flatpickr/dist/plugins/monthSelect/style.css">
@@ -11,10 +14,11 @@
     <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js" defer></script>
     <script src="https://cdn.jsdelivr.net/npm/sortablejs@1.15.2/Sortable.min.js"></script>
     <style>
-      .topbar { position: sticky; top: 0; z-index: 1000; background: #111827; color: #fff; padding: 8px 16px; box-shadow: 0 2px 8px rgba(0,0,0,0.15); }
+      .topbar { position: sticky; top: 0; z-index: 1000; background: linear-gradient(180deg, rgba(2,6,23,0.95), rgba(3,12,28,0.92)); color: #fff; padding: 10px 16px; box-shadow: 0 10px 28px rgba(0,0,0,0.35), 0 0 0 1px rgba(56,189,248,0.15) inset; border-bottom: 1px solid rgba(30,64,175,0.5); backdrop-filter: blur(6px); }
       .tabs { display: flex; gap: 12px; }
-      .tab-btn { background: transparent; color: #fff; border: none; padding: 8px 12px; border-radius: 6px; cursor: pointer; }
-      .tab-btn.active { background: #374151; }
+      .tab-btn { background: transparent; color: #dbeafe; border: 1px solid transparent; padding: 8px 12px; border-radius: 10px; cursor: pointer; transition: all .16s ease; }
+      .tab-btn:hover { border-color: rgba(56,189,248,0.35); background: rgba(15,23,42,0.65); }
+      .tab-btn.active { background: linear-gradient(135deg, rgba(8,47,73,0.92), rgba(30,64,175,0.72)); border-color: rgba(125,211,252,0.55); color: #f8fafc; box-shadow: 0 8px 18px rgba(2,132,199,0.25); }
       .hidden { display: none; }
       .topbar-marquee { overflow: hidden; white-space: nowrap; }
       .marquee-track { display: inline-block; will-change: transform; animation: marquee 48s linear infinite; }
@@ -37,9 +41,9 @@
       .legend-value { color:#e5e7eb; font-weight:700; margin-left:auto; text-align:right; min-width:120px; }
       /* Subtabs: look like real tabs aligned side by side */
       .subtabs { display:flex; gap:8px; border-bottom:1px solid #1f2937; margin-bottom:12px; }
-      .subtab-btn { appearance:none; background:transparent; color:#e5e7eb; border:none; padding:8px 12px; cursor:pointer; border-bottom:2px solid transparent; border-radius:6px 6px 0 0; font-weight:600; }
+      .subtab-btn { appearance:none; background:transparent; color:#cbd5e1; border:none; padding:8px 12px; cursor:pointer; border-bottom:2px solid transparent; border-radius:8px 8px 0 0; font-weight:600; transition: all .16s ease; }
       .subtab-btn:hover { color:#fff; }
-      .subtab-btn.active { color:#fff; border-bottom-color:#3b82f6; }
+      .subtab-btn.active { color:#fff; border-bottom-color:#38bdf8; background: rgba(8,47,73,0.25); }
 
       /* Inputs alineados y consistentes en el modal de formulario */
       .form-modal label { display:block; font-size:0.95rem; color:#e5e7eb; margin-top:8px; }
@@ -195,10 +199,9 @@
   <body>
     <div class="topbar">
       <div class="tabs">
-        <button class="tab-btn active" data-tab="errors">Errores</button>
         <button class="tab-btn" data-tab="tasks">Tareas</button>
         <button class="tab-btn" data-tab="payments">My Money</button>
-        <button class="tab-btn" data-tab="notes">Notas</button>
+        <button class="tab-btn active" data-tab="notes">Notas</button>
       </div>
       <div class="topbar-marquee"><span class="marquee-track"><span class="marquee-label">Próxima tarea:</span><span id="next-task-text">cargando...</span></span></div>
     </div>
@@ -221,7 +224,7 @@
         <div style="margin-top:10px; padding:10px; border:1px solid #1e3a8a; border-radius:10px; background:linear-gradient(180deg,#0b1220,#070f1e);">
           <div style="display:flex; align-items:center; gap:8px; flex-wrap:wrap; margin-bottom:8px;">
             <strong>Conversor:</strong>
-            <input id="fx-amount-input" type="number" step="0.01" min="0" placeholder="Escribe un monto" class="input" style="max-width:180px;" />
+            <input id="fx-amount-input" type="number" step="0.01" min="0" value="100" placeholder="Escribe un monto" class="input" style="max-width:180px;" />
             <select id="fx-base-currency" class="input" style="max-width:170px;">
               <option value="USD">Monto en USD</option>
               <option value="CLP">Monto en CLP</option>
@@ -236,53 +239,6 @@
         </div>
       </div>
 
-      <section id="errors-section" data-section="errors">
-        <section id="create">
-          <h2>Crear error</h2>
-          <button id="error-create-toggle" type="button" class="btn btn-primary" style="margin-bottom:8px;">Crear error</button>
-          <form id="create-form" enctype="multipart/form-data" style="display:none;">
-            <label>Título<br/><input name="title" required class="input" /></label><br/>
-            <label>Mensaje<br/><textarea name="message" required class="input"></textarea></label><br/>
-            <label>Stack (opcional)<br/><textarea name="stack" class="input"></textarea></label><br/>
-            <label>Solución<br/><input name="solution" required class="input" /></label><br/>
-            <label>Tags (separados por coma)<br/><input name="tags" required class="input" /></label><br/>
-            <label>Imágenes (opcional)<br/><input id="images" name="images" type="file" accept="image/*" multiple class="input" /></label><br/>
-            <button type="submit" class="btn btn-success">Crear</button>
-          </form>
-        </section>
-
-        <h2 style="display:flex; align-items:center; gap:8px;">
-          Lista de errores
-          <button id="toggle-errors" type="button" class="btn btn-neutral">Contraer</button>
-          <button id="errors-censor-toggle" type="button" class="btn btn-neutral">Modo P: OFF</button>
-        </h2>
-
-        <div class="filters-row" style="margin-bottom:12px;">
-          <label>Orden
-            <select id="errors-sort" class="input">
-              <option value="desc">Recientes primero</option>
-              <option value="asc">Antiguos primero</option>
-            </select>
-          </label>
-          <label>Tags
-            <input type="text" id="errors-tag-filter" placeholder="ej: nestjs, prisma" class="input" />
-          </label>
-          <button id="errors-refresh" type="button" class="btn btn-neutral" title="Ver todos">↻</button>
-        </div>
-        <div id="errors-pagination" style="display:flex; align-items:center; gap:8px; margin:8px 0;">
-          <button id="errors-page-prev" class="btn btn-neutral" type="button">◀</button>
-          <span id="errors-page-info" style="color:#94a3b8;"></span>
-          <button id="errors-page-next" class="btn btn-neutral" type="button">▶</button>
-          <label style="display:inline-flex; align-items:center; gap:6px; color:#94a3b8;">Por página
-            <select id="errors-page-size" class="input" style="max-width:100px;">
-              <option value="5">5</option>
-              <option value="10" selected>10</option>
-              <option value="20">20</option>
-            </select>
-          </label>
-        </div>
-        <ul id="errors" class="collapsible expanded card"></ul>
-      </section>
       <section id="tasks-section" data-section="tasks" class="hidden">
         <div class="subtabs">
           <button id="tasks-subtab-list" class="subtab-btn active" type="button" data-subtab="list">Lista</button>
@@ -356,6 +312,16 @@
           <button id="tasks-page-prev" class="btn btn-neutral" type="button">◀</button>
           <span id="tasks-page-info" style="color:#94a3b8;"></span>
           <button id="tasks-page-next" class="btn btn-neutral" type="button">▶</button>
+          <label style="display:inline-flex; align-items:center; gap:6px; color:#94a3b8;">
+            Ordenar
+            <select id="tasks-sort" class="input" style="min-width:220px;">
+              <option value="status">Por estado</option>
+              <option value="created-desc" selected>Creación más reciente</option>
+              <option value="start-near">Próxima a iniciar</option>
+              <option value="duration-desc">Duración más larga</option>
+              <option value="duration-asc">Duración más corta</option>
+            </select>
+          </label>
           <label style="margin-left:auto; display:inline-flex; align-items:center; gap:6px; color:#94a3b8;">
             Buscar
             <input id="tasks-search-any" type="text" placeholder="Título, tags, estado, fecha..." class="input" style="min-width:260px; max-width:360px; border:1px solid #0ea5e9; border-radius:10px; background:linear-gradient(180deg,#0b1220,#070f1e); color:#f0f9ff; box-shadow:0 1px 0 rgba(125,211,252,0.14) inset;" />
@@ -392,8 +358,12 @@
                 <button id="cal-close" style="background:#ef4444; color:#fff; padding:6px 10px; border:none; border-radius:6px; cursor:pointer;">Cerrar</button>
               </div>
             </div>
-            <div id="cal-grid-wrap" style="overflow:auto; width:100%;">
-              <div id="cal-grid" style="display:grid; grid-template-columns: repeat(7, minmax(130px, 1fr)); gap:8px; min-width:910px;">
+            <div id="cal-grid-wrap" style="overflow:auto; width:100%; max-height:72vh; position:relative;">
+              <div id="cal-trash-drop" style="display:none; margin-bottom:10px; padding:10px; border:1px dashed #ef4444; border-radius:10px; background:rgba(127,29,29,0.2); color:#fecaca; font-weight:700; text-align:center;">
+                🗑️ Suelta aquí una tarea para eliminarla
+              </div>
+              <div id="cal-weekdays" style="display:grid; gap:8px; position:sticky; top:0; z-index:20; background:#0b1220; padding-bottom:6px;"></div>
+              <div id="cal-grid" style="display:grid; gap:8px;">
                 <!-- headers and days rendered by JS -->
               </div>
             </div>
@@ -536,6 +506,11 @@
         </div>
       </section>
       <section id="notes-section" data-section="notes" class="hidden">
+        <div class="subtabs">
+          <button id="notes-subtab-list" class="subtab-btn active" type="button">Notas</button>
+          <button id="notes-subtab-errors" class="subtab-btn" type="button">Errores</button>
+        </div>
+        <div id="notes-subtab-list-view">
         <h2>Crear nota</h2>
         <button id="note-create-toggle" type="button" class="btn btn-primary" style="margin-bottom:8px;">Crear nota</button>
         <form id="note-create-form" style="display:none;">
@@ -563,6 +538,25 @@
           </label>
         </div>
         <ul id="notes" class="collapsible expanded card"></ul>
+        </div>
+        <div id="notes-subtab-errors-view" class="hidden">
+          <h2 style="margin-top: 6px;">Crear error</h2>
+          <button id="notes-error-create-toggle" type="button" class="btn btn-primary" style="margin-bottom:8px;">Crear error</button>
+          <h2 style="margin-top: 10px;">Lista de errores</h2>
+          <div class="filters-row" style="margin-bottom:12px;">
+            <label>Orden
+              <select id="notes-errors-sort" class="input">
+                <option value="desc">Recientes primero</option>
+                <option value="asc">Antiguos primero</option>
+              </select>
+            </label>
+            <label>Buscar
+              <input type="text" id="notes-errors-search" placeholder="Título, mensaje, solución, tags..." class="input" style="min-width:260px; max-width:420px;" />
+            </label>
+            <button id="notes-errors-refresh" type="button" class="btn btn-neutral" title="Limpiar">↻</button>
+          </div>
+          <ul id="notes-errors-list" class="card"></ul>
+        </div>
       </section>
     </div>
     <script src="https://cdn.jsdelivr.net/npm/flatpickr"></script>

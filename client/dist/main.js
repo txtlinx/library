@@ -35,6 +35,8 @@ document.addEventListener('DOMContentLoaded', () => {
   const calCloseBtn = document.getElementById('cal-close');
   const calHeader = document.getElementById('cal-header');
   const calGrid = document.getElementById('cal-grid');
+  const calWeekdays = document.getElementById('cal-weekdays');
+  const calTrashDrop = document.getElementById('cal-trash-drop');
   const paymentsListEl = document.getElementById('payments');
   const paymentsBanksListEl = document.getElementById('payments-banks-list');
   const paymentCreateToggle = document.getElementById('payment-create-toggle');
@@ -61,11 +63,20 @@ document.addEventListener('DOMContentLoaded', () => {
 
   // Notes selectors
   const notesListEl = document.getElementById('notes');
+  const notesErrorsListEl = document.getElementById('notes-errors-list');
+  const notesErrorCreateToggle = document.getElementById('notes-error-create-toggle');
   const noteCreateToggle = document.getElementById('note-create-toggle');
+  const notesSubtabListBtn = document.getElementById('notes-subtab-list');
+  const notesSubtabErrorsBtn = document.getElementById('notes-subtab-errors');
+  const notesSubtabListView = document.getElementById('notes-subtab-list-view');
+  const notesSubtabErrorsView = document.getElementById('notes-subtab-errors-view');
   const notesPagePrev = document.getElementById('notes-page-prev');
   const notesPageNext = document.getElementById('notes-page-next');
   const notesPageInfo = document.getElementById('notes-page-info');
   const notesPageSizeSel = document.getElementById('notes-page-size');
+  const notesErrorsSortSel = document.getElementById('notes-errors-sort');
+  const notesErrorsSearchInput = document.getElementById('notes-errors-search');
+  const notesErrorsRefreshBtn = document.getElementById('notes-errors-refresh');
 
   const errorsSortSel = document.getElementById('errors-sort');
   const errorsTagFilterInput = document.getElementById('errors-tag-filter');
@@ -90,6 +101,9 @@ document.addEventListener('DOMContentLoaded', () => {
 
   let allTasks = [];
   let filteredTasks = [];
+  let groupedTasksForList = [];
+  const PINNED_TASKS_KEY = 'tasks:pinned:v1';
+  let pinnedTaskIds = new Set();
   let weekCarouselOffsetDays = 0;
   let calYear, calMonth; // 0-based month
   let allPayments = [];
@@ -118,11 +132,64 @@ document.addEventListener('DOMContentLoaded', () => {
     Detenido: { bg:'#7c2d12', fg:'#fde68a' }
   };
   const TYPE_ES = { EXTRA_EXPENSE: 'Gasto extra', FIXED_EXPENSE: 'Gasto fijo', INCOME: 'Ingreso' };
+  const BANK_ICON = {
+    FALABELLA: '/bancos/banco-falabella.png',
+    ESTADO: '/bancos/banco-estado.png',
+    CHILE: '/bancos/banco-chile.jpg',
+    SANTANDER: '/bancos/banco-santander.png'
+  };
   const TYPE_BADGE = {
     'Gasto extra': { bg:'#7c3aed', fg:'#e9d5ff' },
     'Gasto fijo': { bg:'#7c2d12', fg:'#fde68a' },
     'Ingreso': { bg:'#065f46', fg:'#d1fae5' }
   };
+  function loadPinnedTasks(){
+    try {
+      const raw = localStorage.getItem(PINNED_TASKS_KEY);
+      const arr = raw ? JSON.parse(raw) : [];
+      pinnedTaskIds = new Set((Array.isArray(arr) ? arr : []).map((v) => Number(v)).filter((v) => Number.isFinite(v)));
+    } catch {
+      pinnedTaskIds = new Set();
+    }
+  }
+  function savePinnedTasks(){
+    try { localStorage.setItem(PINNED_TASKS_KEY, JSON.stringify([...pinnedTaskIds])); } catch {}
+  }
+  function isPinnedTask(taskId){ return pinnedTaskIds.has(Number(taskId)); }
+  function togglePinTask(taskId){
+    const id = Number(taskId);
+    if (isPinnedTask(id)) pinnedTaskIds.delete(id);
+    else pinnedTaskIds.add(id);
+    savePinnedTasks();
+  }
+  function ensurePinnedVisualStyle(){
+    if (document.getElementById('pinned-live-style')) return;
+    const s = document.createElement('style');
+    s.id = 'pinned-live-style';
+    s.textContent = `
+      @keyframes pinnedPulse {
+        0% { transform: scale(1); box-shadow: 0 0 0 0 rgba(56,189,248,.65); }
+        70% { transform: scale(1.03); box-shadow: 0 0 0 10px rgba(56,189,248,0); }
+        100% { transform: scale(1); box-shadow: 0 0 0 0 rgba(56,189,248,0); }
+      }
+      @keyframes pinFloat {
+        0%,100% { transform: translateY(0); }
+        50% { transform: translateY(-1.5px); }
+      }
+      @keyframes pinTilt {
+        0%,100% { transform: rotate(0deg); }
+        25% { transform: rotate(-8deg); }
+        75% { transform: rotate(8deg); }
+      }
+    `;
+    document.head.appendChild(s);
+  }
+  function getPinIconMarkup(pinned){
+    if (pinned) return '<span style="display:inline-block; animation:pinFloat 1.1s ease-in-out infinite;">📌</span>';
+    return '<span style="display:inline-block; animation:pinTilt 1.4s ease-in-out infinite;">📍</span>';
+  }
+  loadPinnedTasks();
+  ensurePinnedVisualStyle();
 
   // Glow focus consistente para todos los campos de formulario
   function isGlowField(el) {
@@ -154,6 +221,72 @@ document.addEventListener('DOMContentLoaded', () => {
   function applyBtn(el, variant='primary'){ if (!el) return; el.classList.add('btn'); if (variant) el.classList.add('btn-'+variant); }
   function applyInput(el){ if (!el) return; el.classList.add('input'); }
   function applyCard(el){ if (!el) return; el.classList.add('card'); }
+  const FIELD_TEXT_LIMITS = {
+    title: 120,
+    description: 500,
+    message: 1200,
+    stack: 6000,
+    solution: 500,
+    tags: 180,
+    content: 8000,
+    'tasks-search-any': 120,
+    'payments-search-any': 120,
+    'notes-search-any': 120,
+    'errors-tag-filter': 80,
+    'tasks-tag-filter': 80,
+  };
+  const FIELD_NUMBER_LIMITS = {
+    durationMinutes: { digits: 4, min: 1, max: 1440 },
+    amount: { digits: 12, decimals: 2, min: 0 },
+    installments: { digits: 2, min: 0, max: 58 },
+    paidInstallments: { digits: 2, min: 0, max: 58 },
+    cupoTotal: { digits: 12, min: 0 },
+    debtCreditCard: { digits: 12, min: 0 },
+    debtCreditLine: { digits: 12, min: 0 },
+    debtAdvance: { digits: 12, min: 0 },
+    debtConsumerCredit: { digits: 12, min: 0 },
+    totalDebt: { digits: 12, min: 0 },
+  };
+  function enforceInputLimits(root = document){
+    if (!root) return;
+    const inputs = root.querySelectorAll('input, textarea');
+    inputs.forEach((el) => {
+      const key = el.id || el.name || '';
+      const textMax = FIELD_TEXT_LIMITS[key];
+      if (textMax && (el.tagName === 'TEXTAREA' || el.type === 'text' || el.type === 'search')) {
+        el.maxLength = textMax;
+        if (!el.dataset.limitTextBound) {
+          el.addEventListener('input', () => {
+            if ((el.value || '').length > textMax) el.value = (el.value || '').slice(0, textMax);
+          });
+          el.dataset.limitTextBound = '1';
+        }
+      }
+      const numCfg = FIELD_NUMBER_LIMITS[key];
+      if (numCfg && el.type === 'number') {
+        if (numCfg.min != null) el.min = String(numCfg.min);
+        if (numCfg.max != null) el.max = String(numCfg.max);
+        el.setAttribute('inputmode', numCfg.decimals ? 'decimal' : 'numeric');
+        if (!el.dataset.limitNumBound) {
+          el.addEventListener('input', () => {
+            let v = String(el.value || '');
+            if (numCfg.decimals) {
+              v = v.replace(/[^0-9.]/g, '');
+              const parts = v.split('.');
+              const intPart = (parts[0] || '').slice(0, numCfg.digits);
+              const decPart = (parts[1] || '').slice(0, numCfg.decimals);
+              v = decPart.length ? `${intPart}.${decPart}` : intPart;
+            } else {
+              v = v.replace(/\D/g, '').slice(0, numCfg.digits);
+            }
+            if (numCfg.max != null && Number(v || 0) > numCfg.max) v = String(numCfg.max);
+            el.value = v;
+          });
+          el.dataset.limitNumBound = '1';
+        }
+      }
+    });
+  }
   function setupKeyboardForButtons() {
     const shortcutPool = '1234567890ABCDEFGHIJKLMNOPQRSTUVWXYZ'.split('');
     const keyToButton = new Map();
@@ -349,13 +482,20 @@ document.addEventListener('DOMContentLoaded', () => {
   fetchUsdRates();
   updateClocks();
   setInterval(updateClocks, 1000);
+  setInterval(() => { try { refreshLiveStartCountdowns(); } catch {} }, 1000);
   setInterval(fetchUsdRates, 10 * 60 * 1000);
   setupKeyboardForButtons();
   fxAmountInput?.addEventListener('input', renderFxConverter);
   fxBaseCurrency?.addEventListener('change', renderFxConverter);
 
   async function fetchErrors() {
-    try { const res = await fetch('/errors'); if (!res.ok) throw new Error('Error al obtener errores'); allErrors = await res.json(); applyErrorsFilters(); }
+    try {
+      const res = await fetch('/errors');
+      if (!res.ok) throw new Error('Error al obtener errores');
+      allErrors = await res.json();
+      applyErrorsFilters();
+      applyNotesErrorsFilters();
+    }
     catch (err) { console.error(err); if (listEl) listEl.innerHTML = '<li>Error cargando errores</li>'; }
   }
 
@@ -390,6 +530,35 @@ document.addEventListener('DOMContentLoaded', () => {
   errorsPagePrev?.addEventListener('click', ()=>{ errorsPage = Math.max(1, errorsPage - 1); renderErrorsPage(); });
   errorsPageNext?.addEventListener('click', ()=>{ errorsPage = errorsPage + 1; renderErrorsPage(); });
   errorsPageSizeSel?.addEventListener('change', ()=>{ errorsPageSize = parseInt(errorsPageSizeSel.value || '10', 10) || 10; errorsPage = 1; renderErrorsPage(); });
+
+  function applyNotesErrorsFilters() {
+    if (!notesErrorsListEl) return;
+    const sort = notesErrorsSortSel?.value || 'desc';
+    const q = (notesErrorsSearchInput?.value || '').trim().toLowerCase();
+    const items = (Array.isArray(allErrors) ? allErrors : []).filter((e) => {
+      if (!q) return true;
+      const haystack = [
+        e?.title,
+        e?.message,
+        e?.solution,
+        Array.isArray(e?.tags) ? e.tags.join(' ') : e?.tags
+      ].filter(Boolean).join(' ').toLowerCase();
+      return haystack.includes(q);
+    });
+    items.sort((a, b) => {
+      const da = a?.createdAt ? new Date(a.createdAt).getTime() : 0;
+      const db = b?.createdAt ? new Date(b.createdAt).getTime() : 0;
+      return sort === 'asc' ? da - db : db - da;
+    });
+    renderErrors(items, notesErrorsListEl);
+  }
+  notesErrorsSortSel?.addEventListener('change', applyNotesErrorsFilters);
+  notesErrorsSearchInput?.addEventListener('input', applyNotesErrorsFilters);
+  notesErrorsRefreshBtn?.addEventListener('click', () => {
+    if (notesErrorsSearchInput) notesErrorsSearchInput.value = '';
+    if (notesErrorsSortSel) notesErrorsSortSel.value = 'desc';
+    applyNotesErrorsFilters();
+  });
 
   // Modal de mensajes (reutilizable)
   function ensureMessageModal() {
@@ -575,6 +744,7 @@ document.addEventListener('DOMContentLoaded', () => {
         }
         bodyEl.appendChild(row);
       });
+      enforceInputLimits(bodyEl);
     }
     function cleanup(){ overlay.style.opacity='0'; overlay.style.visibility='hidden'; btnCancel.removeEventListener('click', onCancel); btnSubmit.removeEventListener('click', onSubmitClick); btnClose.removeEventListener('click', onCancel); overlay.removeEventListener('click', onOverlayClick); document.removeEventListener('keydown', onKey); }
     function onCancel(e){ e.preventDefault(); cleanup(); }
@@ -608,11 +778,18 @@ document.addEventListener('DOMContentLoaded', () => {
     });
   }
 
+  async function refreshErrorsEverywhere() {
+    await fetchErrors();
+    if (notesSubtabErrorsBtn?.classList.contains('active')) {
+      applyNotesErrorsFilters();
+    }
+  }
+
   // Render de errores
-  function renderErrors(errors) {
-    if (!listEl) return;
-    listEl.innerHTML = '';
-    if (!errors || errors.length === 0) { listEl.innerHTML = '<li>No hay errores</li>'; return; }
+  function renderErrors(errors, targetEl = listEl) {
+    if (!targetEl) return;
+    targetEl.innerHTML = '';
+    if (!errors || errors.length === 0) { targetEl.innerHTML = '<li>No hay errores</li>'; return; }
     errors.forEach(e => {
       const li = document.createElement('li');
       const viewDiv = document.createElement('div');
@@ -637,9 +814,9 @@ document.addEventListener('DOMContentLoaded', () => {
       const btnUpdate=document.createElement('button'); btnUpdate.textContent='Actualizar'; applyBtn(btnUpdate, 'primary');
       const btnDelete=document.createElement('button'); btnDelete.textContent='Eliminar'; btnDelete.className='btn btn-danger';
       btnUpdate.addEventListener('click',()=>openEditModal(e));
-      btnDelete.addEventListener('click', async ()=>{ const confirmed = await showConfirm('¿Eliminar este error?'); if (!confirmed) return; try { const res = await fetch('/errors/'+e.id,{method:'DELETE'}); if (!res.ok) throw new Error(await res.text()||'Error eliminando'); await fetchErrors(); } catch (err) { console.error(err); await showMessageModal('No se pudo eliminar el error', { title: 'Error' }); } });
+      btnDelete.addEventListener('click', async ()=>{ const confirmed = await showConfirm('¿Eliminar este error?'); if (!confirmed) return; try { const res = await fetch('/errors/'+e.id,{method:'DELETE'}); if (!res.ok) throw new Error(await res.text()||'Error eliminando'); await refreshErrorsEverywhere(); } catch (err) { console.error(err); await showMessageModal('No se pudo eliminar el error', { title: 'Error' }); } });
       li.appendChild(viewDiv); li.appendChild(btnUpdate); if (btnToggle) li.appendChild(btnToggle); li.appendChild(btnDelete); if (thumbs) li.appendChild(thumbs);
-      listEl.appendChild(li);
+      targetEl.appendChild(li);
     });
   }
 
@@ -672,7 +849,7 @@ document.addEventListener('DOMContentLoaded', () => {
   // Tabs y contraer listas
   const sections = document.querySelectorAll('[data-section]'); const tabButtons = document.querySelectorAll('.tab-btn[data-tab]');
   function showTab(tab){ sections.forEach(sec=>{ const sTab=sec.getAttribute('data-section'); if (!sTab) return; sec.classList.toggle('hidden', sTab!==tab && !(tab==='tasks' && sTab==='tasks-board')); }); tabButtons.forEach(btn=>{ btn.classList.toggle('active', btn.getAttribute('data-tab')===tab); }); }
-  tabButtons.forEach(btn=>{ btn.addEventListener('click',()=>{ const tab=btn.getAttribute('data-tab'); if (!tab) return; showTab(tab); if (tab==='errors') fetchErrors(); if (tab==='tasks') { if (typeof fetchTasks === 'function') fetchTasks(); } if (tab==='payments') { if (typeof fetchPayments === 'function') fetchPayments(); } if (tab==='notes') { if (typeof fetchNotes === 'function') fetchNotes(); } }); });
+  tabButtons.forEach(btn=>{ btn.addEventListener('click',()=>{ const tab=btn.getAttribute('data-tab'); if (!tab) return; showTab(tab); if (tab==='errors') fetchErrors(); if (tab==='tasks') { if (typeof fetchTasks === 'function') fetchTasks(); } if (tab==='payments') { if (typeof fetchPayments === 'function') fetchPayments(); } if (tab==='notes') { if (typeof window.fetchNotes === 'function') window.fetchNotes(); } }); });
   function setupToggleList(buttonId, listSelector){ const btn=document.getElementById(buttonId); const list=document.querySelector(listSelector); if (!btn || !list) return; btn.addEventListener('click',()=>{ const collapsed=list.classList.toggle('collapsed'); btn.textContent = collapsed ? 'Expandir' : 'Contraer'; }); }
 
   // Persistencia de Modo P en localStorage por sección
@@ -712,7 +889,7 @@ document.addEventListener('DOMContentLoaded', () => {
     const minDur = parseInt(tasksMinDurInput?.value || '0', 10) || 0;
     const status = tasksStatusSel?.value || '';
     const tagFilter = (tasksTagFilterInput?.value || '').trim().toLowerCase();
-    const sort = tasksSortSel?.value || 'all';
+    const sort = tasksSortSel?.value || 'created-desc';
     const from = tasksDateFrom?.value || '';
     const to = tasksDateTo?.value || '';
     filteredTasks = allTasks.filter(t => {
@@ -746,11 +923,40 @@ document.addEventListener('DOMContentLoaded', () => {
     });
     // sort
     const byDate = (a,b,prop) => { const da = a[prop] ? new Date(a[prop]).getTime() : 0; const db = b[prop] ? new Date(b[prop]).getTime() : 0; return da - db; };
-    if (sort === 'start-desc') filteredTasks.sort((a,b)=>byDate(b,a,'startAt'));
-    else if (sort === 'start-asc') filteredTasks.sort((a,b)=>byDate(a,b,'startAt'));
-    else if (sort === 'created-desc') filteredTasks.sort((a,b)=>byDate(b,a,'createdAt'));
-    else if (sort === 'created-asc') filteredTasks.sort((a,b)=>byDate(a,b,'createdAt'));
+    if (sort === 'status') {
+      const rank = { IN_PROGRESS: 0, PAUSED: 1, STOPPED: 2, COMPLETED: 3 };
+      filteredTasks.sort((a,b) => {
+        const ra = rank[getEffectiveTaskStatus(a)] ?? 99;
+        const rb = rank[getEffectiveTaskStatus(b)] ?? 99;
+        if (ra !== rb) return ra - rb;
+        return byDate(a,b,'startAt');
+      });
+    } else if (sort === 'start-near') {
+      const now = Date.now();
+      filteredTasks.sort((a,b) => {
+        const ta = a.startAt ? new Date(a.startAt).getTime() : Infinity;
+        const tb = b.startAt ? new Date(b.startAt).getTime() : Infinity;
+        const wa = ta >= now ? ta : ta + 10_000_000_000;
+        const wb = tb >= now ? tb : tb + 10_000_000_000;
+        return wa - wb;
+      });
+    } else if (sort === 'duration-desc') {
+      filteredTasks.sort((a,b) => (Number(b.durationMinutes || 0) - Number(a.durationMinutes || 0)) || byDate(a,b,'startAt'));
+    } else if (sort === 'duration-asc') {
+      filteredTasks.sort((a,b) => (Number(a.durationMinutes || 0) - Number(b.durationMinutes || 0)) || byDate(a,b,'startAt'));
+    } else if (sort === 'created-desc') {
+      filteredTasks.sort((a,b)=>byDate(b,a,'createdAt'));
+    } else if (sort === 'created-asc') {
+      filteredTasks.sort((a,b)=>byDate(a,b,'createdAt'));
+    }
+    // Siempre priorizar tareas fijadas al inicio, manteniendo el orden elegido entre ellas
+    filteredTasks.sort((a,b) => {
+      const pa = isPinnedTask(a.id) ? 1 : 0;
+      const pb = isPinnedTask(b.id) ? 1 : 0;
+      return pb - pa;
+    });
 
+    groupedTasksForList = buildGroupedTasksForList(filteredTasks);
     tasksPage = 1;
     renderTasksPage();
     updateNextTaskMarquee(filteredTasks);
@@ -759,10 +965,11 @@ document.addEventListener('DOMContentLoaded', () => {
     renderTaskFilterChips();
   }
   function renderTasksPage(){
-    const total = filteredTasks.length; const pages = Math.max(1, Math.ceil(total / tasksPageSize));
+    const listSrc = groupedTasksForList.length ? groupedTasksForList : filteredTasks;
+    const total = listSrc.length; const pages = Math.max(1, Math.ceil(total / tasksPageSize));
     tasksPage = Math.min(Math.max(1, tasksPage), pages);
     const start = (tasksPage - 1) * tasksPageSize;
-    const slice = filteredTasks.slice(start, start + tasksPageSize);
+    const slice = listSrc.slice(start, start + tasksPageSize);
     renderTasks(slice);
     if (tasksPageInfo) tasksPageInfo.textContent = `Página ${tasksPage} de ${pages} · ${total} ítems`;
     if (tasksPagePrev) tasksPagePrev.disabled = tasksPage <= 1;
@@ -776,50 +983,55 @@ document.addEventListener('DOMContentLoaded', () => {
   tasksDateTo?.addEventListener('change', applyTaskFilters);
   tasksDateClear?.addEventListener('click', ()=>{ if (tasksDateFrom) tasksDateFrom.value=''; if (tasksDateTo) tasksDateTo.value=''; applyTaskFilters(); });
 
-  // Botón Crear error -> modal
+  function openCreateErrorModal() {
+    showFormModal({
+      title: 'Nuevo error',
+      fields: [
+        { id: 'title', label: 'Título', type: 'text', value: '' },
+        { id: 'message', label: 'Mensaje', type: 'textarea', rows: 3, value: '' },
+        { id: 'stack', label: 'Stack (opcional)', type: 'textarea', rows: 2, value: '' },
+        { id: 'solution', label: 'Solución', type: 'text', value: '' },
+        { id: 'tags', label: 'Tags (separados por coma)', type: 'text', value: '' },
+        { id: 'images', label: 'Imágenes (opcional)', type: 'file', accept: 'image/*', multiple: true }
+      ],
+      onSubmit: async (values) => {
+        const payload = {
+          title: values.title || '',
+          message: values.message || '',
+          stack: values.stack || undefined,
+          solution: values.solution || '',
+          tags: (values.tags || '').split(',').map(t => t.trim()).filter(Boolean),
+        };
+        try {
+          const res = await fetch('/errors', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
+          if (!res.ok) throw new Error(await res.text());
+          showToast('Error creado', 'success');
+          const created = await res.json(); const errorId = created.id;
+          const files = values.images;
+          if (files && files.length > 0) {
+            const fd = new FormData(); for (let i = 0; i < files.length; i++) fd.append('images', files[i]);
+            const up = await fetch('/errors/' + errorId + '/images', { method: 'POST', body: fd });
+            if (!up.ok) console.error('Upload error', await up.text());
+          }
+          await refreshErrorsEverywhere();
+          await showMessageModal('Error creado correctamente', { title: 'Nuevo error' });
+        } catch (err) {
+          console.error(err);
+          await showMessageModal('No se pudo crear el error', { title: 'Error' });
+        }
+      }
+    });
+  }
   const createBtn = document.getElementById('error-create-toggle');
   if (createBtn) {
     applyBtn(createBtn, 'primary');
     createBtn.textContent = 'Crear error';
-    createBtn.addEventListener('click', () => {
-      showFormModal({
-        title: 'Nuevo error',
-        fields: [
-          { id: 'title', label: 'Título', type: 'text', value: '' },
-          { id: 'message', label: 'Mensaje', type: 'textarea', rows: 3, value: '' },
-          { id: 'stack', label: 'Stack (opcional)', type: 'textarea', rows: 2, value: '' },
-          { id: 'solution', label: 'Solución', type: 'text', value: '' },
-          { id: 'tags', label: 'Tags (separados por coma)', type: 'text', value: '' },
-          { id: 'images', label: 'Imágenes (opcional)', type: 'file', accept: 'image/*', multiple: true }
-        ],
-        onSubmit: async (values) => {
-          const payload = {
-            title: values.title || '',
-            message: values.message || '',
-            stack: values.stack || undefined,
-            solution: values.solution || '',
-            tags: (values.tags || '').split(',').map(t => t.trim()).filter(Boolean),
-          };
-          try {
-            const res = await fetch('/errors', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
-            if (!res.ok) throw new Error(await res.text());
-            showToast('Error creado', 'success');
-            const created = await res.json(); const errorId = created.id;
-            const files = values.images;
-            if (files && files.length > 0) {
-              const fd = new FormData(); for (let i = 0; i < files.length; i++) fd.append('images', files[i]);
-              const up = await fetch('/errors/' + errorId + '/images', { method: 'POST', body: fd });
-              if (!up.ok) console.error('Upload error', await up.text());
-            }
-            await fetchErrors();
-            await showMessageModal('Error creado correctamente', { title: 'Nuevo error' });
-          } catch (err) {
-            console.error(err);
-            await showMessageModal('No se pudo crear el error', { title: 'Error' });
-          }
-        }
-      });
-    });
+    createBtn.addEventListener('click', openCreateErrorModal);
+  }
+  if (notesErrorCreateToggle) {
+    applyBtn(notesErrorCreateToggle, 'primary');
+    notesErrorCreateToggle.textContent = 'Crear error';
+    notesErrorCreateToggle.addEventListener('click', openCreateErrorModal);
   }
 
   // Abrir modal de edición
@@ -851,7 +1063,7 @@ document.addEventListener('DOMContentLoaded', () => {
             const up = await fetch('/errors/' + e.id + '/images', { method: 'POST', body: fd });
             if (!up.ok) console.error('Upload error', await up.text());
           }
-          await fetchErrors();
+          await refreshErrorsEverywhere();
         } catch (err) {
           console.error(err);
           await showMessageModal('No se pudo actualizar el error', { title: 'Error' });
@@ -897,6 +1109,8 @@ document.addEventListener('DOMContentLoaded', () => {
 
   // Timers de tareas activas
   const taskTimers = new Map(); // id -> { el, task }
+  const pendingTaskDeletes = new Map(); // id -> { timeoutId, toastEl, task, index }
+  let draggedTaskId = null;
   function setupTaskTimer(t, host){
     const wrap = document.createElement('span');
     wrap.style.marginLeft = '8px'; wrap.style.fontWeight='700'; wrap.style.color='#facc15'; // yellow-400
@@ -919,6 +1133,87 @@ document.addEventListener('DOMContentLoaded', () => {
     try { renderTasksStartAlert(filteredTasks); } catch {}
   }, 1000);
 
+  function cancelPendingTaskDelete(taskId){
+    const rec = pendingTaskDeletes.get(String(taskId));
+    if (!rec) return false;
+    clearTimeout(rec.timeoutId);
+    if (rec.intervalId) clearInterval(rec.intervalId);
+    try { rec.toastEl?.remove(); } catch {}
+    const exists = (allTasks || []).some(t => Number(t.id) === Number(taskId));
+    if (!exists) {
+      const idx = Math.max(0, Math.min(rec.index ?? 0, allTasks.length));
+      allTasks.splice(idx, 0, rec.task);
+    }
+    pendingTaskDeletes.delete(String(taskId));
+    applyTaskFilters();
+    if (isCalendarOpen()) renderCalendar();
+    showToast('Eliminación deshecha', 'success');
+    return true;
+  }
+
+  function scheduleTaskDelete(task){
+    const id = String(task?.id ?? '');
+    if (!id) return;
+    if (pendingTaskDeletes.has(id)) return;
+    const index = allTasks.findIndex(t => Number(t.id) === Number(task.id));
+    if (index === -1) return;
+    allTasks.splice(index, 1);
+    applyTaskFilters();
+    if (isCalendarOpen()) renderCalendar();
+
+    const toast = document.createElement('div');
+    toast.style.position = 'fixed';
+    toast.style.left = '16px';
+    toast.style.bottom = '16px';
+    toast.style.zIndex = '10050';
+    toast.style.background = '#0b1220';
+    toast.style.border = '1px solid #334155';
+    toast.style.borderRadius = '10px';
+    toast.style.padding = '10px 12px';
+    toast.style.boxShadow = '0 10px 24px rgba(0,0,0,0.45)';
+    toast.style.display = 'flex';
+    toast.style.alignItems = 'center';
+    toast.style.gap = '10px';
+    const txt = document.createElement('span');
+    txt.style.color = '#e5e7eb';
+    txt.textContent = `Tarea eliminada: ${task.title || 'sin título'}`;
+    const undoBtn = document.createElement('button');
+    undoBtn.type = 'button';
+    undoBtn.className = 'btn btn-primary';
+    let remaining = 5;
+    undoBtn.textContent = `Deshacer (${remaining}s)`;
+    undoBtn.style.padding = '6px 10px';
+    undoBtn.addEventListener('click', () => cancelPendingTaskDelete(task.id));
+    toast.appendChild(txt);
+    toast.appendChild(undoBtn);
+    document.body.appendChild(toast);
+
+    const intervalId = setInterval(() => {
+      remaining -= 1;
+      if (remaining >= 0) undoBtn.textContent = `Deshacer (${remaining}s)`;
+    }, 1000);
+
+    const timeoutId = setTimeout(async () => {
+      pendingTaskDeletes.delete(id);
+      clearInterval(intervalId);
+      try { toast.remove(); } catch {}
+      try {
+        const res = await fetch('/tasks/' + task.id, { method: 'DELETE' });
+        if (!res.ok) throw new Error(await res.text());
+        showToast('Tarea eliminada definitivamente', 'success');
+        await fetchTasks(true);
+      } catch (err) {
+        console.error(err);
+        allTasks.splice(Math.max(0, Math.min(index, allTasks.length)), 0, task);
+        applyTaskFilters();
+        if (isCalendarOpen()) renderCalendar();
+        await showMessageModal('No se pudo eliminar la tarea', { title: 'Error' });
+      }
+    }, 5000);
+
+    pendingTaskDeletes.set(id, { timeoutId, intervalId, toastEl: toast, task, index });
+  }
+
   // Tiempo y alertas
   function msToStart(t){ if (!t?.startAt) return Infinity; return new Date(t.startAt).getTime() - Date.now(); }
   function msToEnd(t){ if (!t?.startAt || !t?.durationMinutes) return Infinity; const end = new Date(t.startAt).getTime() + t.durationMinutes*60_000; return end - Date.now(); }
@@ -934,6 +1229,14 @@ document.addEventListener('DOMContentLoaded', () => {
     return raw;
   }
   function fmtCountdown(ms){ const safe = Math.max(0, Math.floor(ms/1000)); const h = Math.floor(safe/3600); const m = Math.floor((safe%3600)/60); const s = safe%60; return `${String(h).padStart(2,'0')}:${String(m).padStart(2,'0')}:${String(s).padStart(2,'0')}`; }
+  function fmtTaskDay(iso){
+    if (!iso) return '';
+    try {
+      return capitalize(new Intl.DateTimeFormat('es-CL', { weekday:'long', day:'2-digit', month:'long' }).format(new Date(iso)));
+    } catch {
+      return '';
+    }
+  }
   function renderTasksStartAlert(tasks){
     if (!tasksStartAlertEl) return;
     const arr = Array.isArray(tasks) ? tasks : [];
@@ -949,8 +1252,91 @@ document.addEventListener('DOMContentLoaded', () => {
       .sort((a,b) => new Date(a.startAt).getTime() - new Date(b.startAt).getTime())[0];
     if (!next) { tasksStartAlertEl.style.display = 'none'; tasksStartAlertEl.textContent = ''; return; }
     const msLeft = new Date(next.startAt).getTime() - now;
+    const dayTxt = fmtTaskDay(next.startAt);
     tasksStartAlertEl.style.display = 'block';
-    tasksStartAlertEl.innerHTML = `La tarea <span class="censor-title">${escapeHtml(next.title || 'sin título')}</span> va a iniciar. Cronómetro a iniciar: <span class="censor-message">${fmtCountdown(msLeft)}</span>`;
+    tasksStartAlertEl.innerHTML = `La tarea <span class="censor-title">${escapeHtml(next.title || 'sin título')}</span> va a iniciar (${escapeHtml(dayTxt)}). Cronómetro a iniciar: <span class="censor-message live-start-countdown" data-start-at="${escapeHtml(next.startAt)}">${fmtCountdown(msLeft)}</span>`;
+  }
+  function refreshLiveStartCountdowns(){
+    document.querySelectorAll('.live-start-countdown').forEach((el) => {
+      const iso = el.getAttribute('data-start-at');
+      if (!iso) return;
+      const ms = new Date(iso).getTime() - Date.now();
+      if (!Number.isFinite(ms)) return;
+      el.textContent = fmtCountdown(ms);
+    });
+  }
+  function weekdayEsShort(day){ return ['Dom','Lun','Mar','Mié','Jue','Vie','Sáb'][day] || ''; }
+  function repeatLabelFromDates(dates){
+    const days = [...new Set(dates.map(d => d.getDay()))].sort((a,b)=>a-b);
+    const isAllWeek = days.length === 7;
+    const isMonFri = JSON.stringify(days) === JSON.stringify([1,2,3,4,5]);
+    if (isAllWeek) return 'Todos los días';
+    if (isMonFri) return 'Lunes a Viernes';
+    return days.map(weekdayEsShort).join(', ');
+  }
+  function buildGroupedTasksForList(tasks){
+    const src = Array.isArray(tasks) ? tasks : [];
+    const groups = new Map();
+    src.forEach((t) => {
+      if (!t || !t.startAt) return;
+      const d = new Date(t.startAt);
+      const hhmm = `${pad2(d.getHours())}:${pad2(d.getMinutes())}`;
+      const tagsKey = (Array.isArray(t.tags) ? t.tags : String(t.tags || '').split(',').map(s=>s.trim()).filter(Boolean)).join('|');
+      const key = [
+        String(t.title || '').trim().toLowerCase(),
+        String(t.description || '').trim().toLowerCase(),
+        String(t.durationMinutes || ''),
+        String(getEffectiveTaskStatus(t) || ''),
+        hhmm,
+        tagsKey.toLowerCase(),
+      ].join('::');
+      if (!groups.has(key)) groups.set(key, []);
+      groups.get(key).push(t);
+    });
+    const groupedIds = new Set();
+    const groupByTaskId = new Map();
+    groups.forEach((items) => {
+      const sorted = [...items].sort((a,b)=>new Date(a.startAt)-new Date(b.startAt));
+      if (sorted.length < 2) return;
+      const first = new Date(sorted[0].startAt).getTime();
+      const last = new Date(sorted[sorted.length - 1].startAt).getTime();
+      if (last - first > 8 * 24 * 60 * 60 * 1000) return; // evitar mezclar ocurrencias lejanas
+      const dates = sorted.map(x => new Date(x.startAt));
+      const label = repeatLabelFromDates(dates);
+      const groupObj = {
+        __isGroup: true,
+        id: `group-${sorted[0].id}`,
+        groupCount: sorted.length,
+        repeatLabel: label,
+        timeLabel: `${pad2(dates[0].getHours())}:${pad2(dates[0].getMinutes())}`,
+        sample: sorted[0],
+        members: sorted,
+        isPinned: sorted.some((x) => isPinnedTask(x.id)),
+      };
+      sorted.forEach(x => {
+        const id = Number(x.id);
+        groupedIds.add(id);
+        groupByTaskId.set(id, groupObj);
+      });
+    });
+    const out = [];
+    const emittedGroups = new Set();
+    src.forEach((t) => {
+      const id = Number(t.id);
+      if (!groupedIds.has(id)) {
+        out.push(t);
+        return;
+      }
+      const g = groupByTaskId.get(id);
+      if (!g) return;
+      if (emittedGroups.has(g.id)) return;
+      emittedGroups.add(g.id);
+      out.push(g);
+    });
+    return out;
+  }
+  function isCalendarOpen(){
+    return !!(calModal && calModal.style.display === 'flex');
   }
 
   // Render de tareas
@@ -961,6 +1347,161 @@ document.addEventListener('DOMContentLoaded', () => {
     const arr = Array.isArray(tasks) ? tasks : [];
     if (arr.length === 0) { tasksListEl.innerHTML = '<li>No hay tareas</li>'; return; }
     arr.forEach(t => {
+      if (t && t.__isGroup) {
+        const li = document.createElement('li');
+        applyCard(li);
+        li.style.border = '1px solid #1f2937';
+        li.style.borderRadius = '10px';
+        li.style.padding = '10px';
+        li.style.background = 'linear-gradient(180deg,#0b1220,#0a1326)';
+        li.style.boxShadow = '0 4px 14px rgba(0,0,0,0.25)';
+        li.style.marginBottom = '8px';
+        li.innerHTML = `
+          <div style="display:flex; align-items:center; justify-content:space-between; gap:10px; flex-wrap:wrap;">
+            <strong class="censor-title">${escapeHtml(t.sample?.title || 'Tarea repetida')}</strong>
+            <div style="display:flex; gap:6px; align-items:center;">
+              ${t.isPinned ? '<span style="display:inline-block; padding:2px 8px; border-radius:999px; background:#083344; color:#67e8f9; font-size:11px; font-weight:800; animation:pinnedPulse 1.2s infinite;">📌 FIJADA</span>' : ''}
+              <span style="display:inline-block; padding:2px 8px; border-radius:999px; background:#1d4ed8; color:#dbeafe; font-size:12px; font-weight:800;">${t.groupCount} tareas</span>
+            </div>
+          </div>
+          <div style="margin-top:6px; color:#cbd5e1; font-size:13px;">
+            Hora: <strong>${escapeHtml(t.timeLabel)}</strong> · Repite: <strong>${escapeHtml(t.repeatLabel)}</strong> · Duración: <strong>${escapeHtml(String(t.sample?.durationMinutes || '-'))} min</strong>
+          </div>
+          <div style="margin-top:4px; color:#94a3b8; font-size:12px;">
+            Este item agrupa tareas repetidas. Edita/elimina desde calendario o detalle individual.
+          </div>
+        `;
+        const nextMember = (t.members || [])
+          .filter((m) => needsStartAlert(m))
+          .sort((a,b)=>new Date(a.startAt)-new Date(b.startAt))[0];
+        if (nextMember) {
+          const msLeft = msToStart(nextMember);
+          const groupStartAlert = document.createElement('div');
+          groupStartAlert.className = 'group-start-alert';
+          groupStartAlert.style.marginTop = '6px';
+          groupStartAlert.style.padding = '8px 10px';
+          groupStartAlert.style.borderRadius = '8px';
+          groupStartAlert.style.border = '1px solid #f59e0b';
+          groupStartAlert.style.background = 'rgba(245,158,11,0.16)';
+          groupStartAlert.style.color = '#fde68a';
+          groupStartAlert.style.fontWeight = '700';
+          groupStartAlert.style.fontSize = '12px';
+          groupStartAlert.innerHTML = `Esta tarea agrupada va a iniciar el <span class="censor-message">${escapeHtml(fmtTaskDay(nextMember.startAt))}</span>. Cronómetro: <span class="censor-message live-start-countdown" data-start-at="${escapeHtml(nextMember.startAt)}">${fmtCountdown(msLeft)}</span>`;
+          li.appendChild(groupStartAlert);
+        }
+        const toggleBtn = document.createElement('button');
+        toggleBtn.type = 'button';
+        toggleBtn.className = 'btn btn-neutral';
+        toggleBtn.textContent = 'Ver detalle';
+        toggleBtn.style.marginTop = '8px';
+        toggleBtn.style.padding = '6px 10px';
+        toggleBtn.style.fontSize = '12px';
+        toggleBtn.style.borderRadius = '8px';
+        const details = document.createElement('div');
+        details.style.display = 'none';
+        details.style.marginTop = '8px';
+        details.style.borderTop = '1px solid #1f2937';
+        details.style.paddingTop = '8px';
+        const membersSorted = [...(t.members || [])].sort((a, b) => {
+          const pa = isPinnedTask(a.id) ? 1 : 0;
+          const pb = isPinnedTask(b.id) ? 1 : 0;
+          if (pb !== pa) return pb - pa;
+          return new Date(a.startAt) - new Date(b.startAt);
+        });
+        membersSorted.forEach((m) => {
+          const row = document.createElement('div');
+          row.style.display = 'flex';
+          row.style.justifyContent = 'space-between';
+          row.style.alignItems = 'center';
+          row.style.gap = '8px';
+          row.style.padding = '6px 8px';
+          row.style.border = '1px solid #1f2937';
+          row.style.borderRadius = '8px';
+          row.style.marginBottom = '6px';
+          row.style.background = '#0b1220';
+          const left = document.createElement('div');
+          left.style.color = '#cbd5e1';
+          left.style.fontSize = '12px';
+          left.innerHTML = `<strong>${escapeHtml(formatDateTime(m.startAt))}</strong> · ${escapeHtml(String(m.durationMinutes || '-'))} min`;
+          if (isPinnedTask(m.id)) {
+            const pinBadge = document.createElement('span');
+            pinBadge.style.display = 'inline-block';
+            pinBadge.style.marginLeft = '6px';
+            pinBadge.style.padding = '1px 7px';
+            pinBadge.style.borderRadius = '999px';
+            pinBadge.style.background = '#083344';
+            pinBadge.style.color = '#67e8f9';
+            pinBadge.style.fontSize = '10px';
+            pinBadge.style.fontWeight = '800';
+            pinBadge.style.animation = 'pinnedPulse 1.2s infinite';
+            pinBadge.textContent = '📌';
+            left.appendChild(pinBadge);
+          }
+          if (needsStartAlert(m)) {
+            const badge = document.createElement('span');
+            badge.style.display = 'inline-block';
+            badge.style.marginLeft = '6px';
+            badge.style.padding = '1px 7px';
+            badge.style.borderRadius = '999px';
+            badge.style.background = '#f59e0b';
+            badge.style.color = '#111827';
+            badge.style.fontSize = '11px';
+            badge.style.fontWeight = '800';
+            badge.innerHTML = `Inicia: <span class="live-start-countdown" data-start-at="${escapeHtml(m.startAt)}">${fmtCountdown(msToStart(m))}</span>`;
+            left.appendChild(badge);
+          }
+          const edit = document.createElement('button');
+          edit.type = 'button';
+          edit.className = 'btn btn-primary';
+          edit.textContent = '✏️';
+          edit.style.padding = '2px 6px';
+          edit.style.fontSize = '11px';
+          edit.style.borderRadius = '6px';
+          edit.addEventListener('click', () => openTaskEditModal(m));
+          const del = document.createElement('button');
+          del.type = 'button';
+          del.className = 'btn btn-danger';
+          del.textContent = '🗑️';
+          del.style.padding = '2px 6px';
+          del.style.fontSize = '11px';
+          del.style.borderRadius = '6px';
+          del.addEventListener('click', async () => {
+            const ok = await showConfirm('¿Eliminar esta tarea?');
+            if (!ok) return;
+            scheduleTaskDelete(m);
+          });
+          const actions = document.createElement('div');
+          actions.style.display = 'flex';
+          actions.style.gap = '4px';
+          const pin = document.createElement('button');
+          pin.type = 'button';
+          pin.className = 'btn btn-neutral';
+          pin.innerHTML = getPinIconMarkup(isPinnedTask(m.id));
+          pin.title = isPinnedTask(m.id) ? 'Desfijar tarea' : 'Fijar tarea';
+          pin.style.padding = '2px 6px';
+          pin.style.fontSize = '11px';
+          pin.style.borderRadius = '6px';
+          pin.addEventListener('click', () => {
+            togglePinTask(m.id);
+            applyTaskFilters();
+          });
+          actions.appendChild(pin);
+          actions.appendChild(edit);
+          actions.appendChild(del);
+          row.appendChild(left);
+          row.appendChild(actions);
+          details.appendChild(row);
+        });
+        toggleBtn.addEventListener('click', () => {
+          const open = details.style.display !== 'none';
+          details.style.display = open ? 'none' : 'block';
+          toggleBtn.textContent = open ? 'Ver detalle' : 'Ocultar detalle';
+        });
+        li.appendChild(toggleBtn);
+        li.appendChild(details);
+        tasksListEl.appendChild(li);
+        return;
+      }
       const li = document.createElement('li');
       applyCard(li);
       li.style.border = '1px solid #1f2937'; li.style.borderRadius='10px'; li.style.padding='10px'; li.style.background='#0b1220'; li.style.boxShadow='0 4px 14px rgba(0,0,0,0.25)'; li.style.marginBottom='8px';
@@ -971,6 +1512,20 @@ document.addEventListener('DOMContentLoaded', () => {
 
       const top = document.createElement('div');
       top.innerHTML = `<strong class="censor-title">${escapeHtml(t.title)}</strong>`;
+      if (isPinnedTask(t.id)) {
+        const pinLive = document.createElement('span');
+        pinLive.textContent = '📌 FIJADA';
+        pinLive.style.display = 'inline-block';
+        pinLive.style.marginLeft = '8px';
+        pinLive.style.padding = '2px 8px';
+        pinLive.style.borderRadius = '999px';
+        pinLive.style.background = '#083344';
+        pinLive.style.color = '#67e8f9';
+        pinLive.style.fontSize = '11px';
+        pinLive.style.fontWeight = '800';
+        pinLive.style.animation = 'pinnedPulse 1.2s infinite';
+        top.appendChild(pinLive);
+      }
       const badge = createStatusBadge(statusTxt);
       top.appendChild(badge);
       li.appendChild(top);
@@ -999,12 +1554,19 @@ document.addEventListener('DOMContentLoaded', () => {
       const btnComplete = mkBtn('Completar', '#10b981', 'success');
       const btnReplicate = mkBtn('Agregar replicar tarea', '#6366f1', 'primary');
       const btnDelete = mkBtn('Eliminar', '#ef4444', 'danger');
+      const btnPin = mkBtn('', '#0e7490', 'neutral');
+      btnPin.innerHTML = getPinIconMarkup(isPinnedTask(t.id));
+      btnPin.title = isPinnedTask(t.id) ? 'Desfijar tarea' : 'Fijar tarea';
       btnEdit.addEventListener('click', () => openTaskEditModal(t));
       btnPause.addEventListener('click', () => updateTaskStatus(t.id, 'pause'));
       btnComplete.addEventListener('click', () => updateTaskStatus(t.id, 'complete'));
       btnReplicate.addEventListener('click', () => replicateTask(t, statusTxt));
-      btnDelete.addEventListener('click', async () => { const ok = await showConfirm('¿Eliminar esta tarea?'); if (!ok) return; try { const res = await fetch('/tasks/' + t.id, { method: 'DELETE' }); if (!res.ok) throw new Error(await res.text()); showToast('Tarea eliminada', 'success'); await fetchTasks(true); } catch (err) { console.error(err); await showMessageModal('No se pudo eliminar la tarea', { title: 'Error' }); } });
-      actions.appendChild(btnEdit); actions.appendChild(btnPause); actions.appendChild(btnComplete); actions.appendChild(btnReplicate); actions.appendChild(btnDelete);
+      btnDelete.addEventListener('click', async () => { const ok = await showConfirm('¿Eliminar esta tarea?'); if (!ok) return; scheduleTaskDelete(t); });
+      btnPin.addEventListener('click', () => {
+        togglePinTask(t.id);
+        applyTaskFilters();
+      });
+      actions.appendChild(btnPin); actions.appendChild(btnEdit); actions.appendChild(btnPause); actions.appendChild(btnComplete); actions.appendChild(btnReplicate); actions.appendChild(btnDelete);
 
       // Lógica de habilitación: Pause
       const activeWindow = isTaskActiveNow(t);
@@ -1030,7 +1592,7 @@ document.addEventListener('DOMContentLoaded', () => {
       fields: [
         { id: 'title', label: 'Título', type: 'text', value: t.title || '' },
         { id: 'description', label: 'Descripción (opcional)', type: 'textarea', rows: 3, value: t.description || '' },
-        { id: 'startAt', label: 'Inicio', type: 'datetime-local', value: t.startAt ? new Date(t.startAt).toISOString().slice(0,16) : '' },
+        { id: 'startAt', label: 'Inicio', type: 'datetime-local', value: t.startAt ? toLocalDateTimeValue(t.startAt) : '' },
         { id: 'durationMinutes', label: 'Duración (minutos)', type: 'number', value: t.durationMinutes != null ? String(t.durationMinutes) : '' },
         { id: 'tags', label: 'Tags (separados por coma)', type: 'text', value: Array.isArray(t.tags)? t.tags.join(', ') : (t.tags||'') },
         // Estado como combobox
@@ -1078,6 +1640,11 @@ document.addEventListener('DOMContentLoaded', () => {
         { id: 'description', label: 'Descripción (opcional)', type: 'textarea', rows: 3, value: prefill.description || '' },
         { id: 'startAt', label: 'Inicio', type: 'datetime-local', value: prefill.startAt || '' },
         { id: 'durationMinutes', label: 'Duración (minutos)', type: 'number', value: prefill.durationMinutes != null ? String(prefill.durationMinutes) : '' },
+        { id: 'repeatWeek', label: 'Repetir en la semana', type: 'select', value: prefill.repeatWeek || 'NONE', options: [
+          { label: 'No repetir', value: 'NONE' },
+          { label: 'Lunes a Viernes', value: 'MON_FRI' },
+          { label: 'Todos los días', value: 'ALL_WEEK' }
+        ] },
         { id: 'tags', label: 'Tags (separados por coma)', type: 'text', value: prefill.tags || '' },
         { id: 'status', label: 'Estado', type: 'select', value: prefill.status || 'IN_PROGRESS', options: [
           { label: 'En progreso', value: 'IN_PROGRESS' },
@@ -1087,20 +1654,103 @@ document.addEventListener('DOMContentLoaded', () => {
         ] }
       ],
       onSubmit: async (values) => {
-        const payload = {
+        const durationMinutes = values.durationMinutes ? parseInt(values.durationMinutes, 10) : 30;
+        const startBase = values.startAt ? new Date(values.startAt) : new Date();
+        const repeatMode = values.repeatWeek || 'NONE';
+        const tags = (values.tags || '').split(',').map(t => t.trim()).filter(Boolean);
+        const basePayload = {
           title: values.title || '',
           description: values.description || undefined,
-          startAt: values.startAt || new Date().toISOString(),
-          durationMinutes: values.durationMinutes ? parseInt(values.durationMinutes, 10) : 30,
-          tags: (values.tags || '').split(',').map(t => t.trim()).filter(Boolean),
+          durationMinutes,
+          tags,
           status: values.status || undefined,
         };
+        const blocks = (allTasks || [])
+          .filter(t => t?.startAt)
+          .map(t => {
+            const s = new Date(t.startAt).getTime();
+            const e = s + (Math.max(1, Number(t.durationMinutes || 30) || 30) * 60_000);
+            return { start: s, end: e };
+          });
+        const offsets = [0];
+        if (repeatMode !== 'NONE') {
+          offsets.length = 0;
+          for (let i = 0; i < 7; i++) {
+            const d = new Date(startBase);
+            d.setDate(startBase.getDate() + i);
+            const wd = d.getDay(); // 0 dom ... 6 sab
+            if (repeatMode === 'MON_FRI' && (wd === 0 || wd === 6)) continue;
+            offsets.push(i);
+          }
+        }
+        const candidates = offsets.map((off) => {
+          const d = new Date(startBase);
+          d.setDate(startBase.getDate() + off);
+          return d;
+        });
+        const isOverlap = (startMs) => {
+          const endMs = startMs + (Math.max(1, durationMinutes || 30) * 60_000);
+          return blocks.some(b => startMs < b.end && endMs > b.start);
+        };
+        const findNextAvailableStart = (fromMs) => {
+          const step = 5 * 60_000;
+          const dur = Math.max(1, durationMinutes || 30) * 60_000;
+          let cursor = Math.max(fromMs, Date.now() + 2 * 60_000);
+          cursor = Math.ceil(cursor / step) * step;
+          const limit = cursor + (14 * 24 * 60 * 60 * 1000);
+          while (cursor < limit) {
+            const end = cursor + dur;
+            const overlap = blocks.some(b => cursor < b.end && end > b.start);
+            if (!overlap) return cursor;
+            cursor += step;
+          }
+          return null;
+        };
+        let created = 0;
+        const skipped = [];
+        const skippedConflicts = [];
         try {
-          const res = await fetch('/tasks', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
-          if (!res.ok) throw new Error(await res.text());
-          showToast('Tarea creada', 'success');
+          for (const dt of candidates) {
+            const startMs = dt.getTime();
+            if (startMs < Date.now() - 60_000) {
+              skipped.push(`${toLocalDateTimeValue(dt)} (pasado)`);
+              continue;
+            }
+            if (isOverlap(startMs)) {
+              skipped.push(`${toLocalDateTimeValue(dt)} (ocupado)`);
+              skippedConflicts.push(dt);
+              continue;
+            }
+            const payload = { ...basePayload, startAt: dt.toISOString() };
+            const res = await fetch('/tasks', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
+            if (!res.ok) {
+              skipped.push(`${toLocalDateTimeValue(dt)} (error)`);
+              continue;
+            }
+            created += 1;
+            blocks.push({ start: startMs, end: startMs + (Math.max(1, durationMinutes || 30) * 60_000) });
+          }
+          if (skippedConflicts.length > 0) {
+            const wantReschedule = await showConfirm(`Hay ${skippedConflicts.length} tareas con conflicto de horario. ¿Quieres cambiarlas al próximo horario disponible?`, { title: 'Conflictos detectados', confirmText: 'Cambiar horario', cancelText: 'Omitir' });
+            if (wantReschedule) {
+              for (const dt of skippedConflicts) {
+                const nextMs = findNextAvailableStart(dt.getTime());
+                if (!nextMs) continue;
+                const payload = { ...basePayload, startAt: new Date(nextMs).toISOString() };
+                const res = await fetch('/tasks', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
+                if (res.ok) {
+                  created += 1;
+                  blocks.push({ start: nextMs, end: nextMs + (Math.max(1, durationMinutes || 30) * 60_000) });
+                }
+              }
+            }
+          }
+          if (created > 0) showToast(`Tarea${created>1?'s':''} creada${created>1?'s':''}: ${created}`, 'success');
           await fetchTasks(true);
-          await showMessageModal('Tarea creada correctamente', { title: 'Nueva tarea' });
+          const msg = skipped.length
+            ? `Creadas: ${created}\nOmitidas por conflicto/pasado: ${skipped.length}\n${skipped.slice(0,6).join('\n')}`
+            : `Creadas: ${created}`;
+          await showMessageModal(msg, { title: 'Nueva tarea' });
         } catch (err) {
           console.error(err);
           await showMessageModal('No se pudo crear la tarea', { title: 'Error' });
@@ -1200,6 +1850,26 @@ document.addEventListener('DOMContentLoaded', () => {
 
   async function replicateTask(task, resolvedStatus){
     try {
+      const findNextAvailableStartIso = (durationMinutes, fromMs) => {
+        const dur = Math.max(5, Number(durationMinutes || 30) || 30) * 60_000;
+        const step = 5 * 60_000;
+        const tasks = (allTasks || []).filter(t => t?.startAt).map(t => {
+          const s = new Date(t.startAt).getTime();
+          const d = Math.max(1, Number(t.durationMinutes || 30) || 30) * 60_000;
+          return { start: s, end: s + d };
+        }).sort((a,b)=>a.start-b.start);
+        let cursor = Math.max(Date.now() + 2 * 60_000, fromMs || 0);
+        cursor = Math.ceil(cursor / step) * step;
+        const limit = cursor + (30 * 24 * 60 * 60 * 1000); // buscar hasta 30 días
+        while (cursor < limit) {
+          const end = cursor + dur;
+          const overlap = tasks.some(t => cursor < t.end && end > t.start);
+          if (!overlap) return new Date(cursor).toISOString();
+          cursor += step;
+        }
+        return new Date(Math.max(Date.now() + 2 * 60_000, fromMs || 0)).toISOString();
+      };
+
       const nextReplicaNumber = (allTasks || [])
         .map(t => {
           const m = String(t?.title || '').match(/^Task\s*#\s*(\d+)$/i);
@@ -1207,12 +1877,17 @@ document.addEventListener('DOMContentLoaded', () => {
         })
         .reduce((max, n) => Math.max(max, n), 0) + 1;
       const nowSafeIso = new Date(Date.now() + 2 * 60 * 1000).toISOString();
-      const originalStart = task?.startAt ? new Date(task.startAt).toISOString() : nowSafeIso;
+      const originalStartMs = task?.startAt ? new Date(task.startAt).getTime() : Date.now();
+      const baseFromMs = Math.max(
+        Date.now() + 2 * 60 * 1000,
+        originalStartMs + (Math.max(1, Number(task?.durationMinutes || 30) || 30) * 60_000), // nunca a la misma hora de la original
+      );
+      const nextAvailableIso = findNextAvailableStartIso(Number(task?.durationMinutes || 30) || 30, baseFromMs);
       const shouldUseNow = resolvedStatus === 'STOPPED' || (task?.startAt && new Date(task.startAt).getTime() < Date.now());
       const payload = {
         title: `Task #${nextReplicaNumber}`,
         description: task?.description || undefined,
-        startAt: shouldUseNow ? nowSafeIso : originalStart,
+        startAt: shouldUseNow ? findNextAvailableStartIso(Number(task?.durationMinutes || 30) || 30, Date.now() + 2 * 60 * 1000) : nextAvailableIso,
         durationMinutes: Number(task?.durationMinutes || 30) || 30,
         tags: Array.isArray(task?.tags) ? task.tags : String(task?.tags || '').split(',').map(s=>s.trim()).filter(Boolean),
         status: shouldUseNow ? 'IN_PROGRESS' : (task?.status || 'PAUSED'),
@@ -1242,7 +1917,11 @@ document.addEventListener('DOMContentLoaded', () => {
     const minDur=(tasksMinDurInput?.value||'').trim(); if (minDur){ host.appendChild(createChip('Min: '+minDur+' min', ()=>{ tasksMinDurInput.value=''; applyTaskFilters(); })); }
     const status=(tasksStatusSel?.value||'').trim(); if (status){ host.appendChild(createChip('Estado: '+status.replace('_',' '), ()=>{ tasksStatusSel.value=''; applyTaskFilters(); })); }
     const tags=(tasksTagFilterInput?.value||'').trim(); if (tags){ host.appendChild(createChip('Tags: '+tags, ()=>{ tasksTagFilterInput.value=''; applyTaskFilters(); })); }
-    const sort=(tasksSortSel?.value||'').trim(); if (sort && sort!=='all'){ host.appendChild(createChip('Orden: '+sort, ()=>{ tasksSortSel.value='all'; applyTaskFilters(); })); }
+    const sort=(tasksSortSel?.value||'').trim();
+    if (sort && sort!=='created-desc'){
+      const sortLabel = ({ status:'Estado', 'created-desc':'Creación reciente', 'start-near':'Próxima a iniciar', 'duration-desc':'Duración larga', 'duration-asc':'Duración corta' }[sort]) || sort;
+      host.appendChild(createChip('Orden: '+sortLabel, ()=>{ tasksSortSel.value='created-desc'; applyTaskFilters(); }));
+    }
     const from=(tasksDateFrom?.value||'').trim(); const to=(tasksDateTo?.value||'').trim();
     if (from){ host.appendChild(createChip('Desde: '+from, ()=>{ tasksDateFrom.value=''; applyTaskFilters(); })); }
     if (to){ host.appendChild(createChip('Hasta: '+to, ()=>{ tasksDateTo.value=''; applyTaskFilters(); })); }
@@ -1277,10 +1956,10 @@ document.addEventListener('DOMContentLoaded', () => {
     base.setHours(0,0,0,0);
     base.setDate(base.getDate() + weekCarouselOffsetDays);
     const startDate = new Date(base); startDate.setDate(base.getDate() - 2);
-    const endDate = new Date(base); endDate.setDate(base.getDate() + 3);
+    const endDate = new Date(base); endDate.setDate(base.getDate() + 2);
     const days = [];
     const groups = [];
-    for (let i = 0; i < 6; i++) {
+    for (let i = 0; i < 5; i++) {
       const d = new Date(startDate);
       d.setDate(startDate.getDate() + i);
       days.push(d);
@@ -1312,11 +1991,45 @@ document.addEventListener('DOMContentLoaded', () => {
       const col = document.createElement('div');
       col.style.border = '1px solid #1f2937'; col.style.borderRadius = '12px'; col.style.padding = '12px'; col.style.background = '#0b1220'; col.style.minHeight='220px'; col.style.boxShadow='0 4px 14px rgba(0,0,0,0.25)';
       const dayDate = days[i];
+      col.addEventListener('dragover', (e) => {
+        e.preventDefault();
+        col.style.outline = '2px solid rgba(56,189,248,0.85)';
+      });
+      col.addEventListener('dragleave', () => {
+        col.style.outline = 'none';
+      });
+      col.addEventListener('drop', async (e) => {
+        e.preventDefault();
+        col.style.outline = 'none';
+        const taskId = e.dataTransfer?.getData('text/task-id') || e.dataTransfer?.getData('text/plain') || draggedTaskId;
+        if (!taskId) return;
+        const result = await moveTaskToCalendarDay(taskId, dayDate);
+        if (!result?.ok && result?.overlap) {
+          const dayKey = localDateKey(dayDate);
+          const sameDayTasks = (allTasks || []).filter((t) => t?.startAt && localDateKey(t.startAt) === dayKey);
+          showAvailabilityModal(dayDate, sameDayTasks, { moveTaskId: taskId, conflictTask: result.overlap });
+        }
+      });
+      const sorted = items.sort((a,b)=>new Date(a.startAt) - new Date(b.startAt));
+      const dayMidTs = new Date(dayDate).setHours(0,0,0,0);
+      const isPastDay = dayMidTs < todayMid.getTime();
       const dayName = capitalize(new Intl.DateTimeFormat('es-CL', { weekday:'short' }).format(dayDate).replace('.', ''));
       const dayNum = new Intl.DateTimeFormat('es-CL', { day:'2-digit', month:'2-digit' }).format(dayDate);
       const h = document.createElement('div'); h.textContent = `${dayName} ${dayNum}`; h.style.fontWeight = '800'; h.style.margin='2px 0 10px'; h.style.color = '#e5e7eb'; h.style.position='sticky'; h.style.top='0'; h.style.background='#0b1220'; h.style.padding='6px 4px';
       col.appendChild(h);
-      const sorted = items.sort((a,b)=>new Date(a.startAt) - new Date(b.startAt));
+      const freeBtn = document.createElement('button');
+      freeBtn.textContent = 'H disponibles';
+      applyBtn(freeBtn, 'primary');
+      freeBtn.style.marginBottom = '10px';
+      if (isPastDay) {
+        freeBtn.disabled = true;
+        freeBtn.style.opacity = '0.5';
+        freeBtn.title = 'No disponible para días pasados';
+      } else {
+        freeBtn.title = 'Ver horarios disponibles del día';
+        freeBtn.addEventListener('click', () => showAvailabilityModal(dayDate, sorted));
+      }
+      col.appendChild(freeBtn);
       if (!sorted.length) {
         const empty = document.createElement('div');
         empty.textContent = 'Sin tareas';
@@ -1326,6 +2039,21 @@ document.addEventListener('DOMContentLoaded', () => {
       }
       sorted.forEach(t => {
         const card = document.createElement('div');
+        card.draggable = true;
+        card.addEventListener('dragstart', (e) => {
+          draggedTaskId = String(t.id);
+          card.style.opacity = '0.55';
+          if (e.dataTransfer) {
+            e.dataTransfer.setData('text/task-id', String(t.id));
+            e.dataTransfer.setData('text/plain', String(t.id));
+            e.dataTransfer.effectAllowed = 'move';
+          }
+        });
+        card.addEventListener('dragend', () => {
+          draggedTaskId = null;
+          card.style.opacity = '1';
+          col.style.outline = 'none';
+        });
         card.style.border='1px solid #1f2937'; card.style.borderRadius='10px'; card.style.padding='10px'; card.style.marginBottom='10px'; card.style.background='linear-gradient(180deg,#0b1220,#0a1222)';
         card.style.wordWrap = 'break-word'; card.style.whiteSpace = 'normal';
         const head = document.createElement('div'); head.style.display='flex'; head.style.justifyContent='space-between'; head.style.alignItems='flex-start'; head.style.gap='8px';
@@ -1340,14 +2068,22 @@ document.addEventListener('DOMContentLoaded', () => {
         if (needsFinishAlert(t)) { const ab = makeAlertBadge('finish'); alertBar.appendChild(ab); }
         if (alertBar.childNodes.length>0) card.appendChild(alertBar);
 
-        // Botón Editar (deshabilitado si es pasado)
-        const actions = document.createElement('div'); actions.style.marginTop='8px';
+        // Acciones (Editar / Eliminar)
+        const actions = document.createElement('div'); actions.style.marginTop='8px'; actions.style.display='flex'; actions.style.gap='8px';
         const btn = document.createElement('button'); btn.textContent = '✏️ Editar';
         btn.style.background = '#3b82f6'; btn.style.color = '#fff'; btn.style.border = 'none'; btn.style.borderRadius = '6px'; btn.style.padding = '6px 10px'; btn.style.cursor = 'pointer';
+        const btnDelete = document.createElement('button'); btnDelete.textContent = 'Eliminar';
+        btnDelete.style.background = '#ef4444'; btnDelete.style.color = '#fff'; btnDelete.style.border = 'none'; btnDelete.style.borderRadius = '6px'; btnDelete.style.padding = '6px 10px'; btnDelete.style.cursor = 'pointer';
         const isPast = t.startAt ? (new Date(t.startAt).setHours(0,0,0,0) < todayMid.getTime()) : false;
         if (isPast) { btn.disabled = true; btn.style.opacity = '0.5'; btn.title = 'No editable (tarea del pasado)'; }
         else { btn.addEventListener('click', () => openTaskEditModal(t)); btn.title = 'Editar tarea'; }
+        btnDelete.addEventListener('click', async () => {
+          const ok = await showConfirm('¿Eliminar esta tarea?');
+          if (!ok) return;
+          scheduleTaskDelete(t);
+        });
         actions.appendChild(btn);
+        actions.appendChild(btnDelete);
         card.appendChild(actions);
 
         col.appendChild(card);
@@ -1363,6 +2099,7 @@ document.addEventListener('DOMContentLoaded', () => {
       if (!res.ok) throw new Error('Error al obtener tareas');
       allTasks = await res.json();
       applyTaskFilters();
+      if (isCalendarOpen()) renderCalendar();
       if (!force) showTab('tasks');
       showToast('Tareas actualizadas', 'success');
     } catch (err) {
@@ -1377,7 +2114,7 @@ document.addEventListener('DOMContentLoaded', () => {
   }
 
   // Filters wiring
-  tasksRefreshBtn?.addEventListener('click', () => { tasksMinDurInput && (tasksMinDurInput.value = ''); tasksStatusSel && (tasksStatusSel.value = ''); tasksTagFilterInput && (tasksTagFilterInput.value = ''); tasksSearchAnyInput && (tasksSearchAnyInput.value = ''); tasksSortSel && (tasksSortSel.value = 'all'); tasksDateFrom && (tasksDateFrom.value = ''); tasksDateTo && (tasksDateTo.value = ''); applyTaskFilters(); });
+  tasksRefreshBtn?.addEventListener('click', () => { tasksMinDurInput && (tasksMinDurInput.value = ''); tasksStatusSel && (tasksStatusSel.value = ''); tasksTagFilterInput && (tasksTagFilterInput.value = ''); tasksSearchAnyInput && (tasksSearchAnyInput.value = ''); tasksSortSel && (tasksSortSel.value = 'created-desc'); tasksDateFrom && (tasksDateFrom.value = ''); tasksDateTo && (tasksDateTo.value = ''); applyTaskFilters(); });
   tasksSortSel?.addEventListener('change', applyTaskFilters);
   tasksMinDurInput?.addEventListener('input', applyTaskFilters);
   tasksStatusSel?.addEventListener('change', applyTaskFilters);
@@ -1427,6 +2164,28 @@ document.addEventListener('DOMContentLoaded', () => {
   paymentsSubtabListBtn?.addEventListener('click', ()=>setPaymentsSubtab('list'));
   paymentsSubtabBanksBtn?.addEventListener('click', ()=>setPaymentsSubtab('banks'));
 
+  async function fetchErrorsForNotesView(){
+    if (!notesErrorsListEl) return;
+    notesErrorsListEl.innerHTML = '<li>Cargando errores...</li>';
+    try {
+      await fetchErrors();
+      applyNotesErrorsFilters();
+    } catch (err) {
+      console.error(err);
+      notesErrorsListEl.innerHTML = '<li>Error cargando errores</li>';
+    }
+  }
+  function setNotesSubtab(which){
+    const isNotes = which === 'notes';
+    notesSubtabListBtn?.classList.toggle('active', isNotes);
+    notesSubtabErrorsBtn?.classList.toggle('active', !isNotes);
+    notesSubtabListView?.classList.toggle('hidden', !isNotes);
+    notesSubtabErrorsView?.classList.toggle('hidden', isNotes);
+    if (!isNotes) fetchErrorsForNotesView();
+  }
+  notesSubtabListBtn?.addEventListener('click', ()=>setNotesSubtab('notes'));
+  notesSubtabErrorsBtn?.addEventListener('click', ()=>setNotesSubtab('errors'));
+
   // Toggle list button for tasks
   setupToggleList('toggle-tasks', '#tasks');
   // Toggle list for payments
@@ -1443,13 +2202,88 @@ document.addEventListener('DOMContentLoaded', () => {
     renderCalendar();
     calModal.style.display = 'flex';
   }
-  function closeTasksCalendar(){ if (calModal) calModal.style.display = 'none'; }
+  function closeTasksCalendar(){
+    if (calModal) calModal.style.display = 'none';
+    if (calTrashDrop) calTrashDrop.style.display = 'none';
+    draggedTaskId = null;
+  }
+  function isCompactCalendarMode(){
+    return (window.innerWidth || 9999) <= 600;
+  }
+  function showCalendarTaskQuickModal(task){
+    let overlay = document.getElementById('calendar-task-quick-overlay');
+    if (!overlay) {
+      overlay = document.createElement('div');
+      overlay.id = 'calendar-task-quick-overlay';
+      overlay.style.position = 'fixed';
+      overlay.style.inset = '0';
+      overlay.style.background = 'rgba(2,6,23,0.74)';
+      overlay.style.backdropFilter = 'blur(3px)';
+      overlay.style.display = 'none';
+      overlay.style.alignItems = 'center';
+      overlay.style.justifyContent = 'center';
+      overlay.style.zIndex = '10030';
+      overlay.innerHTML = `
+        <div style="width:min(460px,92vw); background:#020617; border:1px solid #0ea5e9; border-radius:12px; padding:12px; box-shadow:0 20px 50px rgba(0,0,0,.55);">
+          <div id="calendar-task-quick-title" style="color:#e2e8f0; font-weight:800; margin-bottom:8px;"></div>
+          <div id="calendar-task-quick-info" style="color:#cbd5e1; font-size:13px; margin-bottom:10px;"></div>
+          <div style="display:flex; justify-content:flex-end; gap:8px;">
+            <button id="calendar-task-quick-delete" class="btn btn-danger" type="button">Eliminar</button>
+            <button id="calendar-task-quick-edit" class="btn btn-primary" type="button">Editar</button>
+            <button id="calendar-task-quick-close" class="btn btn-neutral" type="button">Cerrar</button>
+          </div>
+        </div>`;
+      document.body.appendChild(overlay);
+      overlay.addEventListener('click', (e) => { if (e.target === overlay) overlay.style.display = 'none'; });
+      overlay.querySelector('#calendar-task-quick-close')?.addEventListener('click', () => { overlay.style.display = 'none'; });
+    }
+    const titleEl = overlay.querySelector('#calendar-task-quick-title');
+    const infoEl = overlay.querySelector('#calendar-task-quick-info');
+    if (titleEl) titleEl.textContent = task?.title || 'Tarea';
+    if (infoEl) infoEl.textContent = `${formatDateTime(task?.startAt)} · ${Number(task?.durationMinutes || 0) || 0} min`;
+    overlay.querySelector('#calendar-task-quick-edit')?.addEventListener('click', () => {
+      overlay.style.display = 'none';
+      openTaskEditModal(task);
+    }, { once: true });
+    overlay.querySelector('#calendar-task-quick-delete')?.addEventListener('click', async () => {
+      const ok = await showConfirm('¿Eliminar esta tarea?');
+      if (!ok) return;
+      overlay.style.display = 'none';
+      scheduleTaskDelete(task);
+    }, { once: true });
+    overlay.style.display = 'flex';
+  }
+  function applyCalendarGridLayout(){
+    const vw = window.innerWidth || 1280;
+    let cellMin = 130;
+    if (vw <= 480) cellMin = 92;
+    else if (vw <= 768) cellMin = 104;
+    else if (vw <= 1024) cellMin = 116;
+    const minWidth = cellMin * 7 + 8 * 6;
+    if (calWeekdays) {
+      calWeekdays.style.gridTemplateColumns = `repeat(7, minmax(${cellMin}px, 1fr))`;
+      calWeekdays.style.minWidth = `${minWidth}px`;
+    }
+    if (calGrid) {
+      calGrid.style.gridTemplateColumns = `repeat(7, minmax(${cellMin}px, 1fr))`;
+      calGrid.style.minWidth = `${minWidth}px`;
+    }
+  }
   async function moveTaskToCalendarDay(taskId, targetDate){
     const task = (allTasks || []).find(t => Number(t.id) === Number(taskId));
-    if (!task || !task.startAt) return;
+    if (!task || !task.startAt) return { ok: false };
     const src = new Date(task.startAt);
     const next = new Date(targetDate);
     next.setHours(src.getHours(), src.getMinutes(), 0, 0);
+    const nextStart = next.getTime();
+    const nextEnd = nextStart + (Math.max(1, Number(task.durationMinutes || 30) || 30) * 60_000);
+    const overlap = (allTasks || []).find((t) => {
+      if (!t || !t.startAt || Number(t.id) === Number(task.id)) return false;
+      const s = new Date(t.startAt).getTime();
+      const e = s + (Math.max(1, Number(t.durationMinutes || 30) || 30) * 60_000);
+      return nextStart < e && nextEnd > s;
+    });
+    if (overlap) return { ok: false, overlap };
     try {
       const res = await fetch('/tasks/' + task.id, {
         method: 'PATCH',
@@ -1459,10 +2293,32 @@ document.addEventListener('DOMContentLoaded', () => {
       if (!res.ok) throw new Error(await res.text());
       showToast('Tarea movida', 'success');
       await fetchTasks(true);
-      renderCalendar();
+      if (isCalendarOpen()) renderCalendar();
+      return { ok: true };
     } catch (err) {
       console.error(err);
       await showMessageModal('No se pudo mover la tarea a ese día', { title: 'Error' });
+      return { ok: false };
+    }
+  }
+  async function moveTaskToStartIso(taskId, startAtIso){
+    const task = (allTasks || []).find(t => Number(t.id) === Number(taskId));
+    if (!task) return false;
+    try {
+      const res = await fetch('/tasks/' + task.id, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ startAt: new Date(startAtIso).toISOString() }),
+      });
+      if (!res.ok) throw new Error(await res.text());
+      showToast('Tarea movida al horario seleccionado', 'success');
+      await fetchTasks(true);
+      if (isCalendarOpen()) renderCalendar();
+      return true;
+    } catch (err) {
+      console.error(err);
+      await showMessageModal('No se pudo mover la tarea al horario seleccionado', { title: 'Error' });
+      return false;
     }
   }
   function minutesToHHmm(mins){
@@ -1491,7 +2347,9 @@ document.addEventListener('DOMContentLoaded', () => {
     }
     return free;
   }
-  function showAvailabilityModal(dayDate, dayTasks){
+  function showAvailabilityModal(dayDate, dayTasks, opts = {}){
+    const moveTaskId = opts?.moveTaskId ? Number(opts.moveTaskId) : null;
+    const conflictTask = opts?.conflictTask || null;
     let overlay = document.getElementById('availability-overlay');
     if (!overlay) {
       overlay = document.createElement('div');
@@ -1534,12 +2392,21 @@ document.addEventListener('DOMContentLoaded', () => {
               <strong class="censor-title">${escapeHtml(t.title || 'Tarea')}</strong><br/>
               <small style="color:#93c5fd;">${pad2(new Date(t.startAt).getHours())}:${pad2(new Date(t.startAt).getMinutes())} · ${Number(t.durationMinutes || 0) || 0} min</small>
             </div>
-            <button type="button" class="availability-edit-btn btn btn-primary" data-task-id="${t.id}" title="Editar tarea">✏️</button>
+            <div style="display:flex; gap:6px;">
+              <button type="button" class="availability-edit-btn btn btn-primary" data-task-id="${t.id}" title="Editar tarea">✏️</button>
+              <button type="button" class="availability-delete-btn btn btn-danger" data-task-id="${t.id}" title="Eliminar tarea">🗑️</button>
+            </div>
           </div>`).join('')
         : `<div style="padding:10px; border:1px dashed #334155; border-radius:10px; color:#94a3b8;">No hay tareas creadas este día.</div>`;
+      const conflictHtml = conflictTask
+        ? `<div style="margin-bottom:10px; padding:10px; border:1px solid #ef4444; border-radius:10px; background:rgba(127,29,29,0.2); color:#fecaca;">
+            Conflicto de horario con: <strong>${escapeHtml(conflictTask.title || 'Tarea')}</strong> (${formatDateTime(conflictTask.startAt)})
+           </div>`
+        : '';
       contentEl.innerHTML = `
+        ${conflictHtml}
         <div style="margin-bottom:10px;">
-          <div style="color:#e2e8f0; font-weight:700; margin-bottom:8px;">Crear tarea inmediata</div>
+          <div style="color:#e2e8f0; font-weight:700; margin-bottom:8px;">${moveTaskId ? 'Selecciona horario alternativo' : 'Crear tarea inmediata'}</div>
           <div style="display:flex; flex-wrap:wrap; gap:8px;">${freeHtml}</div>
         </div>
         <div style="margin-top:10px;">
@@ -1548,11 +2415,16 @@ document.addEventListener('DOMContentLoaded', () => {
           <button type="button" id="availability-create-day-btn" class="btn btn-success" style="margin-top:10px;">+ Nueva tarea este día</button>
         </div>`;
       contentEl.querySelectorAll('.availability-slot-btn').forEach((btn) => {
-        btn.addEventListener('click', () => {
+        btn.addEventListener('click', async () => {
           const startAt = btn.getAttribute('data-slot-start') || startOfDay;
           const dur = parseInt(btn.getAttribute('data-slot-duration') || '60', 10) || 60;
-          overlay.style.display = 'none';
-          openTaskCreateModal({ startAt, durationMinutes: dur, status: 'IN_PROGRESS' });
+          if (moveTaskId) {
+            const ok = await moveTaskToStartIso(moveTaskId, startAt);
+            if (ok) overlay.style.display = 'none';
+          } else {
+            overlay.style.display = 'none';
+            openTaskCreateModal({ startAt, durationMinutes: dur, status: 'IN_PROGRESS' });
+          }
         });
       });
       contentEl.querySelectorAll('.availability-edit-btn').forEach((btn) => {
@@ -1564,24 +2436,53 @@ document.addEventListener('DOMContentLoaded', () => {
           openTaskEditModal(task);
         });
       });
-      contentEl.querySelector('#availability-create-day-btn')?.addEventListener('click', () => {
-        overlay.style.display = 'none';
-        openTaskCreateModal({ startAt: startOfDay, durationMinutes: 60, status: 'IN_PROGRESS' });
+      contentEl.querySelectorAll('.availability-delete-btn').forEach((btn) => {
+        btn.addEventListener('click', async () => {
+          const id = Number(btn.getAttribute('data-task-id'));
+          const task = (allTasks || []).find((t) => Number(t.id) === id);
+          if (!task) return;
+          const ok = await showConfirm('¿Eliminar esta tarea?');
+          if (!ok) return;
+          scheduleTaskDelete(task);
+          overlay.style.display = 'none';
+        });
       });
+      const createDayBtn = contentEl.querySelector('#availability-create-day-btn');
+      if (createDayBtn) {
+        if (moveTaskId) createDayBtn.style.display = 'none';
+        else createDayBtn.addEventListener('click', () => {
+          overlay.style.display = 'none';
+          openTaskCreateModal({ startAt: startOfDay, durationMinutes: 60, status: 'IN_PROGRESS' });
+        });
+      }
     }
     overlay.style.display = 'flex';
   }
 
   function renderCalendar(){
     if (!calGrid || !calHeader) return;
+    applyCalendarGridLayout();
     calGrid.innerHTML = '';
+    if (calWeekdays) calWeekdays.innerHTML = '';
     const firstDay = new Date(calYear, calMonth, 1);
     const lastDay = new Date(calYear, calMonth + 1, 0);
     const monthName = new Intl.DateTimeFormat('es-CL', { month: 'long' }).format(firstDay);
     calHeader.textContent = `${capitalize(monthName)} ${calYear}`;
 
     const weekdays = ['Lun','Mar','Mié','Jue','Vie','Sáb','Dom'];
-    weekdays.forEach(w => { const h=document.createElement('div'); h.textContent=w; h.style.fontWeight='600'; h.style.color='#cbd5e1'; h.style.textAlign='center'; calGrid.appendChild(h); });
+    weekdays.forEach(w => {
+      const h = document.createElement('div');
+      h.textContent = w;
+      h.style.fontWeight = '700';
+      h.style.color = '#cbd5e1';
+      h.style.textAlign = 'center';
+      h.style.padding = '8px 4px';
+      h.style.borderRadius = '8px';
+      h.style.background = 'linear-gradient(180deg, #0b1220, #091126)';
+      h.style.border = '1px solid #1f2937';
+      h.style.boxShadow = '0 6px 14px rgba(0,0,0,0.35)';
+      (calWeekdays || calGrid).appendChild(h);
+    });
 
     const padStart = (firstDay.getDay() + 6) % 7;
     for (let i = 0; i < padStart; i++) { const cell = document.createElement('div'); cell.style.minHeight = '64px'; calGrid.appendChild(cell); }
@@ -1663,9 +2564,20 @@ document.addEventListener('DOMContentLoaded', () => {
       cell.addEventListener('drop', async (e) => {
         e.preventDefault();
         cell.style.outline = 'none';
-        const taskId = e.dataTransfer?.getData('text/task-id');
+        const taskId = e.dataTransfer?.getData('text/task-id') || e.dataTransfer?.getData('text/plain') || draggedTaskId;
         if (!taskId) return;
-        await moveTaskToCalendarDay(taskId, date);
+        const result = await moveTaskToCalendarDay(taskId, date);
+        if (result && result.ok === false && result.overlap) {
+          const conflict = result.overlap;
+          const sameDayTasks = (allTasks || [])
+            .filter(t => t?.startAt)
+            .filter(t => {
+              const ts = new Date(t.startAt);
+              return ts.getFullYear() === date.getFullYear() && ts.getMonth() === date.getMonth() && ts.getDate() === date.getDate();
+            })
+            .sort((a,b)=>new Date(a.startAt)-new Date(b.startAt));
+          showAvailabilityModal(date, sameDayTasks, { moveTaskId: taskId, conflictTask: conflict });
+        }
       });
 
       dayTasks.forEach(t => {
@@ -1680,13 +2592,18 @@ document.addEventListener('DOMContentLoaded', () => {
         item.style.cursor = 'grab';
         item.addEventListener('dragstart', (e) => {
           item.style.opacity = '0.65';
+          draggedTaskId = String(t.id);
+          if (calTrashDrop) calTrashDrop.style.display = 'block';
           if (e.dataTransfer) {
             e.dataTransfer.setData('text/task-id', String(t.id));
+            e.dataTransfer.setData('text/plain', String(t.id));
             e.dataTransfer.effectAllowed = 'move';
           }
         });
         item.addEventListener('dragend', () => {
           item.style.opacity = '1';
+          draggedTaskId = null;
+          if (calTrashDrop) calTrashDrop.style.display = 'none';
         });
         // Color según estado
         if (String(t.status) === 'COMPLETED') {
@@ -1703,7 +2620,10 @@ document.addEventListener('DOMContentLoaded', () => {
           item.style.border = '1px solid rgba(59,130,246,0.35)';
         }
         const left = document.createElement('div');
-        left.innerHTML = `${pad2(new Date(t.startAt).getHours())}:${pad2(new Date(t.startAt).getMinutes())} <span class="censor-title">${escapeHtml(t.title)}</span> <small style="opacity:.9;">(${Number(t.durationMinutes || 0) || 0}m)</small>`;
+        const compact = isCompactCalendarMode();
+        left.innerHTML = compact
+          ? `${pad2(new Date(t.startAt).getHours())}:${pad2(new Date(t.startAt).getMinutes())} <small style="opacity:.9;">(${Number(t.durationMinutes || 0) || 0}m)</small>`
+          : `${pad2(new Date(t.startAt).getHours())}:${pad2(new Date(t.startAt).getMinutes())} <span class="censor-title">${escapeHtml(t.title)}</span> <small style="opacity:.9;">(${Number(t.durationMinutes || 0) || 0}m)</small>`;
         left.style.minWidth = '0';
         left.style.wordBreak = 'break-word';
         const editBtn = document.createElement('button');
@@ -1714,13 +2634,40 @@ document.addEventListener('DOMContentLoaded', () => {
         editBtn.style.padding = '2px 6px';
         editBtn.style.fontSize = '11px';
         editBtn.style.borderRadius = '6px';
+        const deleteBtn = document.createElement('button');
+        deleteBtn.type = 'button';
+        deleteBtn.textContent = '🗑️';
+        deleteBtn.title = 'Eliminar tarea';
+        deleteBtn.className = 'btn btn-danger';
+        deleteBtn.style.padding = '2px 6px';
+        deleteBtn.style.fontSize = '11px';
+        deleteBtn.style.borderRadius = '6px';
         editBtn.addEventListener('click', (e) => {
           e.preventDefault();
           e.stopPropagation();
           openTaskEditModal(t);
         });
+        deleteBtn.addEventListener('click', async (e) => {
+          e.preventDefault();
+          e.stopPropagation();
+          const ok = await showConfirm('¿Eliminar esta tarea?');
+          if (!ok) return;
+          scheduleTaskDelete(t);
+        });
+        const rightActions = document.createElement('div');
+        rightActions.style.display = 'flex';
+        rightActions.style.gap = '4px';
+        rightActions.appendChild(editBtn);
+        rightActions.appendChild(deleteBtn);
         item.appendChild(left);
-        item.appendChild(editBtn);
+        item.appendChild(rightActions);
+        if (compact) {
+          item.addEventListener('click', (e) => {
+            const tag = (e.target?.tagName || '').toLowerCase();
+            if (tag === 'button') return;
+            showCalendarTaskQuickModal(t);
+          });
+        }
         cell.appendChild(item);
       });
 
@@ -1737,7 +2684,7 @@ document.addEventListener('DOMContentLoaded', () => {
     if (tasksMinDurInput) tasksMinDurInput.value = '';
     if (tasksStatusSel) tasksStatusSel.value = '';
     if (tasksTagFilterInput) tasksTagFilterInput.value = '';
-    if (tasksSortSel) tasksSortSel.value = 'all';
+    if (tasksSortSel) tasksSortSel.value = 'created-desc';
     if (tasksDateFrom) tasksDateFrom.value = '';
     if (tasksDateTo) tasksDateTo.value = '';
     applyTaskFilters();
@@ -1746,24 +2693,56 @@ document.addEventListener('DOMContentLoaded', () => {
   calNextBtn?.addEventListener('click', () => { if (calMonth === 11) { calMonth = 0; calYear++; } else calMonth++; renderCalendar(); });
   calCloseBtn?.addEventListener('click', closeTasksCalendar);
   calModal?.addEventListener('click', (e) => { if (e.target === calModal) closeTasksCalendar(); });
+  if (calTrashDrop) {
+    calTrashDrop.style.position = 'fixed';
+    calTrashDrop.style.right = '16px';
+    calTrashDrop.style.bottom = '16px';
+    calTrashDrop.style.zIndex = '10020';
+    calTrashDrop.style.width = 'min(360px, 86vw)';
+    calTrashDrop.style.boxShadow = '0 14px 30px rgba(0,0,0,0.45)';
+  }
+  calTrashDrop?.addEventListener('dragover', (e) => {
+    e.preventDefault();
+    calTrashDrop.style.outline = '2px solid rgba(248,113,113,0.8)';
+    if (e.dataTransfer) e.dataTransfer.dropEffect = 'move';
+  });
+  calTrashDrop?.addEventListener('dragleave', () => {
+    calTrashDrop.style.outline = 'none';
+  });
+  calTrashDrop?.addEventListener('drop', async (e) => {
+    e.preventDefault();
+    calTrashDrop.style.outline = 'none';
+    calTrashDrop.style.display = 'none';
+    const taskId = e.dataTransfer?.getData('text/task-id') || e.dataTransfer?.getData('text/plain') || draggedTaskId;
+    if (!taskId) return;
+    const task = (allTasks || []).find((t) => String(t.id) === String(taskId));
+    if (!task) return;
+    const ok = await showConfirm('¿Eliminar esta tarea?');
+    if (!ok) return;
+    scheduleTaskDelete(task);
+  });
+  window.addEventListener('resize', () => {
+    if (!isCalendarOpen()) return;
+    applyCalendarGridLayout();
+  });
+  document.addEventListener('keydown', (e) => {
+    if (e.key !== 'Escape') return;
+    if (calModal && calModal.style.display === 'flex') closeTasksCalendar();
+    const avail = document.getElementById('availability-overlay');
+    if (avail && avail.style.display === 'flex') avail.style.display = 'none';
+  });
 
   // Expose for tab handler
   window.fetchTasks = fetchTasks;
 
   // Inicialización
-  showTab('errors');
-  fetchErrors();
+  showTab('notes');
 
   // Actualización periódica de alertas y cronómetros
   setInterval(() => { try { applyTaskFilters(); } catch {} }, 30*1000);
 
-  const BANK_ICON = {
-    FALABELLA: '/bancos/banco-falabella.png',
-    ESTADO: '/bancos/banco-estado.png',
-    CHILE: '/bancos/banco-chile.jpg',
-    SANTANDER: '/bancos/banco-santander.png'
-  };
   setPaymentsSubtab('list');
+  setNotesSubtab('notes');
   renderBanksOverview(allPayments);
 
   function renderPayments(payments) {
@@ -2317,23 +3296,46 @@ document.addEventListener('DOMContentLoaded', () => {
   }
 
   // Enhance filters selects
-  makeSelectSearchable(tasksSortSel);
   makeSelectSearchable(tasksStatusSel);
   makeSelectSearchable(paymentsBankSel);
   makeSelectSearchable(paymentsTypeSel);
   makeSelectSearchable(paymentsStatusSel);
   wireStaticFlatpickrInputs();
+  enforceInputLimits();
 
   // Toast utility
   function showToast(message, kind = 'neutral', timeout = 2500){
     try {
+      let host = document.getElementById('toast-host');
+      if (!host) {
+        host = document.createElement('div');
+        host.id = 'toast-host';
+        host.style.position = 'fixed';
+        host.style.right = '16px';
+        host.style.bottom = '16px';
+        host.style.zIndex = '10060';
+        host.style.display = 'flex';
+        host.style.flexDirection = 'column';
+        host.style.alignItems = 'flex-end';
+        host.style.gap = '8px';
+        host.style.pointerEvents = 'none';
+        document.body.appendChild(host);
+      }
       const t = document.createElement('div');
       t.className = 'toast';
+      t.style.position = 'relative';
+      t.style.right = 'auto';
+      t.style.bottom = 'auto';
+      t.style.pointerEvents = 'auto';
       t.style.background = kind==='success'? '#052e2b' : kind==='danger'? '#320e12' : '#0a0f1e';
       t.style.borderColor = kind==='success'? '#10b981' : kind==='danger'? '#ef4444' : '#1f2937';
       t.textContent = message;
-      document.body.appendChild(t);
-      setTimeout(()=>{ t.style.opacity = '0'; t.style.transition = 'opacity 200ms ease'; setTimeout(()=>{ try { document.body.removeChild(t); } catch {} }, 220); }, timeout);
+      host.appendChild(t);
+      setTimeout(()=>{
+        t.style.opacity = '0';
+        t.style.transition = 'opacity 200ms ease';
+        setTimeout(()=>{ try { t.remove(); } catch {} }, 220);
+      }, timeout);
     } catch {}
   }
 
@@ -2588,6 +3590,9 @@ document.addEventListener('DOMContentLoaded', () => {
     notesPageNext2?.addEventListener('click', ()=>{ notesPage2 = notesPage2 + 1; renderNotesPage(); });
     notesPageSizeSel2?.addEventListener('change', ()=>{ notesPageSize2 = parseInt(notesPageSizeSel2.value || '10', 10) || 10; notesPage2 = 1; renderNotesPage(); });
     notesSearchAnyInput2?.addEventListener('input', ()=>{ notesPage2 = 1; renderNotesPage(); });
+
+    // Exponer para navegación por pestañas
+    window.fetchNotes = loadNotes;
 
     // Inicializar
     loadNotes();
