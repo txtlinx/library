@@ -1,6 +1,9 @@
-import { BadRequestException, Body, Controller, Get, Param, Post, Put } from '@nestjs/common';
+import { BadRequestException, Body, Controller, Get, Param, Post, Put, UseGuards } from '@nestjs/common';
 import { ApiBody, ApiOperation, ApiParam, ApiResponse, ApiTags } from '@nestjs/swagger';
 import { BankAccountsService, UpdateBankAccount } from '../service/bank-accounts.service';
+import { AuthGuard } from '../../auth/auth.guard';
+import { RolesGuard } from '../../auth/roles.guard';
+import { Roles } from '../../auth/roles.decorator';
 
 const BANKS = ['FALABELLA', 'ESTADO', 'CHILE', 'SANTANDER'] as const;
 type BankEnum = (typeof BANKS)[number];
@@ -18,6 +21,8 @@ export class BankAccountsController {
   }
 
   @Post('reset')
+  @UseGuards(AuthGuard, RolesGuard)
+  @Roles('ADMIN')
   @ApiOperation({ summary: 'Resetear bancos fijos a valores base' })
   @ApiResponse({ status: 200, description: 'Bancos reseteados' })
   async reset() {
@@ -25,6 +30,8 @@ export class BankAccountsController {
   }
 
   @Put(':bank')
+  @UseGuards(AuthGuard, RolesGuard)
+  @Roles('ADMIN')
   @ApiOperation({ summary: 'Actualizar configuración de un banco fijo' })
   @ApiParam({ name: 'bank', required: true, description: 'Banco', example: 'FALABELLA' })
   @ApiBody({ description: 'Datos editables del banco' })

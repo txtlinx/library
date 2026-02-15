@@ -2,6 +2,7 @@ document.addEventListener('DOMContentLoaded', () => {
   const listEl = document.getElementById('errors');
   const ipV4El = document.getElementById('ip-v4');
   const ipV6El = document.getElementById('ip-v6');
+  const ipPublicEl = document.getElementById('ip-public');
   const timeLocalEl = document.getElementById('time-local');
   const timeSantiagoEl = document.getElementById('time-santiago');
   const usdClpEl = document.getElementById('usd-clp');
@@ -77,6 +78,23 @@ document.addEventListener('DOMContentLoaded', () => {
   const notesErrorsSortSel = document.getElementById('notes-errors-sort');
   const notesErrorsSearchInput = document.getElementById('notes-errors-search');
   const notesErrorsRefreshBtn = document.getElementById('notes-errors-refresh');
+  const profilesTabBtn = document.getElementById('profiles-tab-btn');
+  const profilesUsersListEl = document.getElementById('profiles-users-list');
+  const profilesCreateBtn = document.getElementById('profiles-create-btn');
+  const profilesRefreshBtn = document.getElementById('profiles-refresh-btn');
+  const profilesSearchInput = document.getElementById('profiles-search-input');
+  const activityTabBtn = document.getElementById('activity-tab-btn');
+  const activityListEl = document.getElementById('activity-list');
+  const activityRefreshBtn = document.getElementById('activity-refresh-btn');
+  const activityLimitSel = document.getElementById('activity-limit');
+  const activityTypeSummaryEl = document.getElementById('activity-type-summary');
+  const activityBellWrap = document.getElementById('activity-bell-wrap');
+  const activityBellBtn = document.getElementById('activity-bell-btn');
+  const activityBellDot = document.getElementById('activity-bell-dot');
+  const appMenuBtn = document.getElementById('app-menu-btn');
+  const authOpenBtn = document.getElementById('auth-open-btn');
+  const authLogoutBtn = document.getElementById('auth-logout-btn');
+  const authUserBadge = document.getElementById('auth-user-badge');
 
   const errorsSortSel = document.getElementById('errors-sort');
   const errorsTagFilterInput = document.getElementById('errors-tag-filter');
@@ -102,6 +120,8 @@ document.addEventListener('DOMContentLoaded', () => {
   let allTasks = [];
   let filteredTasks = [];
   let groupedTasksForList = [];
+  let pendingTaskTimeAlerts = new Set();
+  let lastTaskSnapshot = new Map();
   const PINNED_TASKS_KEY = 'tasks:pinned:v1';
   let pinnedTaskIds = new Set();
   let weekCarouselOffsetDays = 0;
@@ -124,6 +144,7 @@ document.addEventListener('DOMContentLoaded', () => {
   let filteredNotes = [];
   let notesPage = 1;
   let notesPageSize = 10;
+  let allUsers = [];
 
   const STATUS_ES = { PAYING: 'Pagando', PAID: 'Pagado', PAUSED: 'Detenido' };
   const STATUS_BADGE = {
@@ -143,6 +164,1193 @@ document.addEventListener('DOMContentLoaded', () => {
     'Gasto fijo': { bg:'#7c2d12', fg:'#fde68a' },
     'Ingreso': { bg:'#065f46', fg:'#d1fae5' }
   };
+  const AUTH_TOKEN_KEY = 'auth_token_v1';
+  const AUTH_USER_KEY = 'auth_user_v1';
+  const ACTIVITY_SEEN_KEY = 'activity_last_seen_v1';
+  const ACTIVITY_UNREAD_KEY = 'activity_unread_v1';
+  const ACTIVITY_ITEMS_KEY = 'activity_items_v1';
+  const ACTIVITY_READ_IDS_KEY = 'activity_read_ids_v1';
+  const ACTIVITY_PINNED_KEYS = 'activity_pinned_keys_v1';
+  const UI_THEME_KEY = 'ui_theme_v1';
+  let bellOutsideClickHandler = null;
+  let bellKeydownHandler = null;
+  let activityLatestItems = [];
+
+  function getAuthToken() {
+    try { return localStorage.getItem(AUTH_TOKEN_KEY) || ''; } catch { return ''; }
+  }
+  function getAuthUser() {
+    try {
+      const raw = localStorage.getItem(AUTH_USER_KEY);
+      return raw ? JSON.parse(raw) : null;
+    } catch {
+      return null;
+    }
+  }
+  function isAdminUser() {
+    const user = getAuthUser();
+    return !!user && String(user.role || '').toUpperCase() === 'ADMIN';
+  }
+  function blockAdminAction(btn, message = 'Accion solo para ADMIN') {
+    if (!btn || isAdminUser()) return false;
+    btn.disabled = true;
+    btn.style.opacity = '0.45';
+    btn.title = 'Requiere rol ADMIN';
+    btn.addEventListener('click', async (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      await showMessageModal(message, { title: 'Permisos' });
+    });
+    return true;
+  }
+  function toHeaderSafe(value) {
+    try { return encodeURIComponent(String(value || '')); } catch { return ''; }
+  }
+  function refreshUiByRole() {
+    try { renderErrorsPage(); } catch {}
+    try { renderTasksPage(); } catch {}
+    try { renderPaymentsPage(); } catch {}
+    try { renderBanksOverview(allPayments); } catch {}
+    try { applyNotesErrorsFilters(); } catch {}
+    try { fetchActivityLogs(); } catch {}
+  }
+  function getActivityScopeKey() {
+    const u = getAuthUser();
+    const scope = u?.id != null ? `id:${u.id}` : (u?.email ? `email:${String(u.email).toLowerCase()}` : 'anon');
+    return scope;
+  }
+  function getActivityScopeCandidates() {
+    const u = getAuthUser();
+    const out = [];
+    if (u?.id != null) out.push(`id:${u.id}`);
+    if (u?.email) out.push(`email:${String(u.email).toLowerCase()}`);
+    if (!out.length) out.push('anon');
+    return [...new Set(out)];
+  }
+  function getActivitySeenAt() {
+    try {
+      for (const k of getActivityScopeCandidates()) {
+        const v = localStorage.getItem(`${ACTIVITY_SEEN_KEY}:${k}`) || '';
+        if (v) return v;
+      }
+      return '';
+    } catch { return ''; }
+  }
+  function setActivitySeenAt(value) {
+    try {
+      const v = value || new Date().toISOString();
+      getActivityScopeCandidates().forEach((k) => localStorage.setItem(`${ACTIVITY_SEEN_KEY}:${k}`, v));
+    } catch {}
+  }
+  function getActivityUnreadCached() {
+    try {
+      for (const k of getActivityScopeCandidates()) {
+        const raw = localStorage.getItem(`${ACTIVITY_UNREAD_KEY}:${k}`);
+        if (raw != null) return Math.max(0, Number(raw) || 0);
+      }
+      return 0;
+    } catch { return 0; }
+  }
+  function setActivityUnreadCached(n) {
+    try {
+      const v = String(Math.max(0, Number(n) || 0));
+      getActivityScopeCandidates().forEach((k) => localStorage.setItem(`${ACTIVITY_UNREAD_KEY}:${k}`, v));
+    } catch {}
+  }
+  function getActivityItemsCached() {
+    try {
+      for (const k of getActivityScopeCandidates()) {
+        const raw = localStorage.getItem(`${ACTIVITY_ITEMS_KEY}:${k}`) || '[]';
+        const arr = JSON.parse(raw);
+        if (Array.isArray(arr) && arr.length) return arr;
+      }
+      return [];
+    } catch { return []; }
+  }
+  function setActivityItemsCached(items) {
+    try {
+      const safe = Array.isArray(items) ? items.slice(0, 300) : [];
+      const raw = JSON.stringify(safe);
+      getActivityScopeCandidates().forEach((k) => localStorage.setItem(`${ACTIVITY_ITEMS_KEY}:${k}`, raw));
+    } catch {}
+  }
+  function getActivityReadIdsCached() {
+    try {
+      for (const k of getActivityScopeCandidates()) {
+        const raw = localStorage.getItem(`${ACTIVITY_READ_IDS_KEY}:${k}`) || '[]';
+        const arr = JSON.parse(raw);
+        if (Array.isArray(arr) && arr.length) return new Set(arr.map((x) => String(x)));
+      }
+      return new Set();
+    } catch { return new Set(); }
+  }
+  function setActivityReadIdsCached(setLike) {
+    try {
+      const arr = [...(setLike instanceof Set ? setLike : new Set())].slice(-2000);
+      const raw = JSON.stringify(arr);
+      getActivityScopeCandidates().forEach((k) => localStorage.setItem(`${ACTIVITY_READ_IDS_KEY}:${k}`, raw));
+    } catch {}
+  }
+  function getNotificationIdentity(it) {
+    if (!it) return '';
+    return String(it.id || `${it.entity || 'other'}:${it.entityId || ''}:${it.createdAt || ''}:${asFriendlyNotification(it)}`);
+  }
+  function markNotificationRead(it) {
+    const set = getActivityReadIdsCached();
+    const key = getNotificationIdentity(it);
+    if (!key) return;
+    set.add(key);
+    setActivityReadIdsCached(set);
+  }
+  function clearAllReadNotifications() {
+    setActivityReadIdsCached(new Set());
+  }
+  function getActivityPinnedKeysCached() {
+    try {
+      for (const k of getActivityScopeCandidates()) {
+        const raw = localStorage.getItem(`${ACTIVITY_PINNED_KEYS}:${k}`) || '[]';
+        const arr = JSON.parse(raw);
+        if (Array.isArray(arr) && arr.length) return new Set(arr.map((x) => String(x)));
+      }
+      return new Set();
+    } catch { return new Set(); }
+  }
+  function setActivityPinnedKeysCached(setLike) {
+    try {
+      const arr = [...(setLike instanceof Set ? setLike : new Set())].slice(0, 8);
+      const raw = JSON.stringify(arr);
+      getActivityScopeCandidates().forEach((k) => localStorage.setItem(`${ACTIVITY_PINNED_KEYS}:${k}`, raw));
+    } catch {}
+  }
+  function togglePinnedNotificationKey(key) {
+    if (!key) return;
+    const set = getActivityPinnedKeysCached();
+    if (set.has(key)) set.delete(key);
+    else {
+      set.add(key);
+      while (set.size > 8) {
+        const first = set.values().next().value;
+        set.delete(first);
+      }
+    }
+    setActivityPinnedKeysCached(set);
+  }
+  function renderActivityBell(unread, persist = true) {
+    if (!activityBellDot) return;
+    const n = Math.max(0, Number(unread) || 0);
+    if (persist) setActivityUnreadCached(n);
+    activityBellDot.textContent = String(n > 99 ? '99+' : n);
+    activityBellDot.classList.toggle('hidden', n <= 0);
+  }
+  function asFriendlyNotification(it){
+    const action = String(it?.action || '').toUpperCase();
+    const entity = String(it?.entity || '').toLowerCase();
+    const id = it?.entityId ? `#${it.entityId}` : '';
+    const md = it?.metadata || {};
+    if (md?.source === 'client' && md?.displayName) return String(md.displayName);
+    const name = String(md?.displayName || '').trim();
+    const ref = name ? `"${name}"` : id || 'registro';
+    if (entity === 'tasks') {
+      if (action === 'POST') return `Tarea ${ref} creada`;
+      if (action === 'PATCH' || action === 'PUT') return `Tarea ${ref} actualizada`;
+      if (action === 'DELETE') return `Tarea ${ref} eliminada`;
+    }
+    if (entity === 'payments' || entity === 'bank-accounts') {
+      if (action === 'POST') return `Pago ${ref} agregado`;
+      if (action === 'PATCH' || action === 'PUT') return `Pago ${ref} actualizado`;
+      if (action === 'DELETE') return `Pago ${ref} eliminado`;
+    }
+    if (entity === 'errors') {
+      if (action === 'POST') return `Error ${ref} creado`;
+      if (action === 'PATCH' || action === 'PUT') return `Error ${ref} actualizado`;
+      if (action === 'DELETE') return `Error ${ref} eliminado`;
+    }
+    if (entity === 'notes') {
+      if (action === 'POST') return `Nota ${ref} creada`;
+      if (action === 'PATCH' || action === 'PUT') return `Nota ${ref} actualizada`;
+      if (action === 'DELETE') return `Nota ${ref} eliminada`;
+    }
+    if (entity === 'users') {
+      if (action === 'POST') return `Usuario ${ref} creado`;
+      if (action === 'PATCH' || action === 'PUT') return `Usuario ${ref} actualizado`;
+      if (action === 'DELETE') return `Usuario ${ref} eliminado`;
+    }
+    if (entity === 'auth') {
+      const path = String(md?.path || '');
+      if (path.includes('/auth/users')) {
+        if (action === 'POST') return `Usuario ${ref} creado`;
+        if (action === 'PATCH' || action === 'PUT') return `Usuario ${ref} actualizado`;
+        if (action === 'DELETE') return `Usuario ${ref} eliminado`;
+      }
+      if (path.includes('/login')) return 'Inicio de sesión';
+      if (path.includes('/register')) return 'Registro de usuario';
+      if (path.includes('/reset-password')) return 'Reseteo de contraseña';
+    }
+    return `${action || 'ACCION'} ${entity || 'sistema'} ${ref}`.trim();
+  }
+  function getNotificationLeadIcon(it) {
+    const action = String(it?.action || '').toUpperCase();
+    if (action === 'DELETE') return '🗑️';
+    return '';
+  }
+  function isUnreadNotification(it) {
+    const read = getActivityReadIdsCached();
+    const idKey = getNotificationIdentity(it);
+    if (idKey && read.has(idKey)) return false;
+    const lastSeen = getActivitySeenAt();
+    if (!it?.createdAt) return false;
+    if (!lastSeen) return true;
+    return new Date(it.createdAt).getTime() > new Date(lastSeen).getTime();
+  }
+  function formatRelativeTime(iso) {
+    if (!iso) return '-';
+    const now = Date.now();
+    const t = new Date(iso).getTime();
+    if (!Number.isFinite(t)) return '-';
+    const diff = Math.max(0, now - t);
+    const s = Math.floor(diff / 1000);
+    if (s < 60) return 'hace unos segundos';
+    const m = Math.floor(s / 60);
+    if (m < 60) return `hace ${m} min`;
+    const h = Math.floor(m / 60);
+    if (h < 24) return `hace ${h} h`;
+    const d = Math.floor(h / 24);
+    if (d === 1) return 'ayer';
+    return `hace ${d} días`;
+  }
+  function groupBellItems(items) {
+    const map = new Map();
+    (Array.isArray(items) ? items : []).forEach((it) => {
+      const text = asFriendlyNotification(it);
+      const k = `${String(it?.entity || 'other').toLowerCase()}::${text}`;
+      const prev = map.get(k);
+      if (!prev) {
+        map.set(k, { item: it, text, count: 1, newestAt: it?.createdAt || null, unreadCount: isUnreadNotification(it) ? 1 : 0 });
+      } else {
+        prev.count += 1;
+        if (isUnreadNotification(it)) prev.unreadCount += 1;
+        const prevTs = new Date(prev.newestAt || 0).getTime();
+        const curTs = new Date(it?.createdAt || 0).getTime();
+        if (curTs > prevTs) {
+          prev.item = it;
+          prev.newestAt = it?.createdAt || prev.newestAt;
+        }
+      }
+    });
+    return [...map.values()].sort((a, b) => new Date(b.newestAt || 0) - new Date(a.newestAt || 0));
+  }
+  function dedupeNotifications(items) {
+    const src = Array.isArray(items) ? [...items] : [];
+    src.sort((a, b) => new Date(b?.createdAt || 0).getTime() - new Date(a?.createdAt || 0).getTime());
+    const out = [];
+    for (const it of src) {
+      const entity = String(it?.entity || '').toLowerCase();
+      const entityId = it?.entityId != null ? String(it.entityId) : '';
+      const action = String(it?.action || '').toUpperCase();
+      const dedupKey = String(it?.metadata?.dedupKey || '').trim();
+      const txt = String(asFriendlyNotification(it) || '').trim().toLowerCase();
+      const ts = new Date(it?.createdAt || 0).getTime();
+      const isClient = it?.metadata?.source === 'client';
+      // Evita doble notificación en tareas PATCH cuando ya existe una notificación cliente más específica
+      // (ej: "Se movió la tarea ...") para la misma tarea en ventana cercana.
+      if (entity === 'tasks' && action === 'PATCH' && !isClient) {
+        const hasSpecificClient = src.some((c) => {
+          if (!c || c === it) return false;
+          if (c?.metadata?.source !== 'client') return false;
+          if (String(c?.entity || '').toLowerCase() !== 'tasks') return false;
+          const cid = c?.entityId != null ? String(c.entityId) : '';
+          if (cid !== entityId || !cid) return false;
+          const cts = new Date(c?.createdAt || 0).getTime();
+          return Number.isFinite(cts) && Math.abs(cts - ts) <= 120000;
+        });
+        if (hasSpecificClient) continue;
+      }
+      const idx = out.findIndex((x) => {
+        const k2 = String(x?.metadata?.dedupKey || '').trim();
+        if (dedupKey && k2 && dedupKey === k2) return true;
+        const e2 = String(x?.entity || '').toLowerCase();
+        const id2 = x?.entityId != null ? String(x.entityId) : '';
+        const t2 = String(asFriendlyNotification(x) || '').trim().toLowerCase();
+        const ts2 = new Date(x?.createdAt || 0).getTime();
+        return e2 === entity && id2 === entityId && t2 === txt && Math.abs(ts2 - ts) <= 120000;
+      });
+      if (idx === -1) {
+        out.push(it);
+        continue;
+      }
+      const prev = out[idx];
+      const prevClient = prev?.metadata?.source === 'client';
+      const prevTs = new Date(prev?.createdAt || 0).getTime();
+      if (prevClient && !isClient) out[idx] = it;
+      else if (Number.isFinite(ts) && Number.isFinite(prevTs) && ts > prevTs) out[idx] = it;
+    }
+    return out.slice(0, 300);
+  }
+  function sanitizeActivityCacheForCurrentUser() {
+    try {
+      const cached = getActivityItemsCached();
+      if (!Array.isArray(cached) || !cached.length) {
+        if (!activityLatestItems.length) renderActivityBell(getActivityUnreadCached(), false);
+        return;
+      }
+      const cleaned = dedupeNotifications(cached);
+      activityLatestItems = cleaned;
+      setActivityItemsCached(cleaned);
+      const unread = cleaned.filter((it) => isUnreadNotification(it)).length;
+      renderActivityBell(unread);
+    } catch {
+      renderActivityBell(getActivityUnreadCached(), false);
+    }
+  }
+  function getUiTheme() {
+    try { return localStorage.getItem(UI_THEME_KEY) || 'default'; } catch { return 'default'; }
+  }
+  function setUiTheme(theme) {
+    const allowed = new Set(['default', 'soft', 'midnight', 'aurora', 'blue']);
+    const next = allowed.has(String(theme || '')) ? String(theme) : 'default';
+    document.body.setAttribute('data-ui-theme', next);
+    try { localStorage.setItem(UI_THEME_KEY, next); } catch {}
+  }
+  function closeAppMenuAnimated() {
+    const menu = document.getElementById('app-menu-dropdown');
+    if (!menu || menu.style.display === 'none') return;
+    menu.style.opacity = '0';
+    menu.style.transform = 'translateY(-10px) scale(.97)';
+    setTimeout(() => { menu.style.display = 'none'; }, 220);
+  }
+  async function logoutFlow() {
+    const ok = await openLogoutConfirmModal();
+    if (!ok) return;
+    clearAuthSession();
+    showToast('Sesión cerrada', 'neutral');
+    closeAppMenuAnimated();
+  }
+  function openAppMenu(evt) {
+    evt?.stopPropagation?.();
+    let menu = document.getElementById('app-menu-dropdown');
+    if (!menu) {
+      menu = document.createElement('div');
+      menu.id = 'app-menu-dropdown';
+      menu.style.position = 'fixed';
+      menu.style.right = '18px';
+      menu.style.top = '64px';
+      menu.style.width = 'min(320px, 92vw)';
+      menu.style.maxHeight = '72vh';
+      menu.style.overflow = 'auto';
+      menu.style.zIndex = '10026';
+      menu.style.border = '1px solid rgba(125,211,252,.45)';
+      menu.style.borderRadius = '14px';
+      menu.style.background = 'linear-gradient(180deg, rgba(7,26,52,.98), rgba(8,33,74,.96))';
+      menu.style.boxShadow = '0 24px 55px rgba(2,132,199,.28), 0 0 0 1px rgba(56,189,248,.18) inset';
+      menu.style.padding = '12px';
+      menu.style.transition = 'opacity .22s ease, transform .22s ease';
+      document.body.appendChild(menu);
+    }
+    const isOpen = menu.style.display === 'block';
+    if (isOpen) { closeAppMenuAnimated(); return; }
+    const currentTheme = getUiTheme();
+    const styles = [
+      { id: 'default', label: 'Actual (Default)' },
+      { id: 'blue', label: 'Blue' },
+      { id: 'soft', label: 'Menos intenso' },
+      { id: 'midnight', label: 'Midnight' },
+      { id: 'aurora', label: 'Aurora' },
+    ];
+    const adminSection = isAdminUser() ? `
+      <div style="margin-top:10px; border:1px solid rgba(56,189,248,.28); border-radius:10px; padding:10px; background:linear-gradient(180deg, rgba(7,19,41,.96), rgba(8,29,58,.92));">
+        <div style="color:#93c5fd; font-size:12px; font-weight:700; margin-bottom:8px;">Administración</div>
+        <button id="app-menu-users" class="btn btn-neutral" type="button" style="width:100%; justify-content:flex-start; text-align:left; padding:7px 10px; font-size:12px; border-radius:9px; background:linear-gradient(135deg,#334155,#1e293b);">Perfiles y usuarios</button>
+      </div>
+    ` : '';
+    menu.innerHTML = `
+      <div style="color:#e0f2fe; font-weight:800; margin-bottom:8px;">Configuración</div>
+      <div style="border:1px solid rgba(56,189,248,.28); border-radius:10px; padding:10px; background:linear-gradient(180deg, rgba(7,19,41,.96), rgba(8,29,58,.92));">
+        <div style="color:#93c5fd; font-size:12px; font-weight:700; margin-bottom:8px;">Estilos</div>
+        <div style="display:flex; flex-direction:column; gap:6px;">
+          ${styles.map((s) => `<button class="app-theme-btn btn btn-neutral" type="button" data-theme="${s.id}" style="justify-content:flex-start; text-align:left; padding:7px 10px; font-size:12px; border-radius:9px; background:${currentTheme === s.id ? 'linear-gradient(135deg,#0ea5e9,#2563eb)' : 'linear-gradient(135deg,#334155,#1e293b)'};">${s.label}</button>`).join('')}
+        </div>
+      </div>
+      ${adminSection}
+      <div style="margin-top:10px; border-top:1px solid rgba(125,211,252,.24); padding-top:10px; display:flex; justify-content:flex-end;">
+        <button id="app-menu-logout" class="btn btn-danger" type="button" style="padding:7px 12px; border-radius:9px;">Cerrar sesión</button>
+      </div>
+    `;
+    menu.querySelectorAll('.app-theme-btn').forEach((b) => {
+      b.addEventListener('click', () => {
+        const t = b.getAttribute('data-theme') || 'default';
+        setUiTheme(t);
+        openAppMenu();
+      });
+    });
+    menu.querySelector('#app-menu-users')?.addEventListener('click', () => {
+      closeAppMenuAnimated();
+      showTab('profiles');
+      if (typeof fetchUsers === 'function') fetchUsers();
+    });
+    menu.querySelector('#app-menu-logout')?.addEventListener('click', logoutFlow);
+    menu.style.display = 'block';
+    menu.style.opacity = '0';
+    menu.style.transform = 'translateY(-10px) scale(.97)';
+    requestAnimationFrame(() => {
+      menu.style.opacity = '1';
+      menu.style.transform = 'translateY(0) scale(1)';
+    });
+    const closeOnOutside = (e) => {
+      if (!menu.contains(e.target) && e.target !== appMenuBtn) closeAppMenuAnimated();
+    };
+    document.addEventListener('click', closeOnOutside, { capture: true, once: true });
+  }
+  function ensureNotifyHighlightStyle() {
+    if (document.getElementById('notif-jump-style')) return;
+    const s = document.createElement('style');
+    s.id = 'notif-jump-style';
+    s.textContent = `@keyframes notifJumpPulse{0%{box-shadow:0 0 0 0 rgba(56,189,248,.75);}70%{box-shadow:0 0 0 10px rgba(56,189,248,0);}100%{box-shadow:0 0 0 0 rgba(56,189,248,0);}} .notif-jump-target{outline:2px solid #38bdf8 !important; animation:notifJumpPulse 1.4s ease-in-out 2;}`;
+    document.head.appendChild(s);
+  }
+  function highlightElement(el) {
+    if (!el) return;
+    ensureNotifyHighlightStyle();
+    el.classList.add('notif-jump-target');
+    try { el.scrollIntoView({ behavior: 'smooth', block: 'center' }); } catch {}
+    setTimeout(() => el.classList.remove('notif-jump-target'), 3000);
+  }
+  function extractNotificationName(it) {
+    const mdName = String(it?.metadata?.displayName || '').trim();
+    if (mdName) return mdName;
+    const txt = String(asFriendlyNotification(it) || '');
+    const m = txt.match(/"([^"]+)"/);
+    return m ? String(m[1]).trim() : '';
+  }
+  function getTaskListIndexByTaskId(taskId) {
+    const id = Number(taskId);
+    const listSrc = groupedTasksForList.length ? groupedTasksForList : filteredTasks;
+    return listSrc.findIndex((it) => {
+      if (!it) return false;
+      if (it.__isGroup) return Array.isArray(it.members) && it.members.some((m) => Number(m.id) === id);
+      return Number(it.id) === id;
+    });
+  }
+  async function jumpToNotificationTarget(entityRaw, entityIdRaw, notifItem = null) {
+    const entity = String(entityRaw || '').toLowerCase();
+    const idStr = String(entityIdRaw ?? '').trim();
+    const id = idStr === '' ? NaN : Number(idStr);
+    const nameHint = extractNotificationName(notifItem);
+    if (entity === 'tasks') {
+      showTab('tasks');
+      try { await fetchTasks(true); } catch {}
+      let task = Number.isFinite(id) ? (allTasks || []).find((t) => Number(t.id) === id) : null;
+      if (!task && nameHint) {
+        task = [...(allTasks || [])]
+          .filter((t) => String(t?.title || '').trim().toLowerCase() === nameHint.toLowerCase())
+          .sort((a, b) => new Date(b?.createdAt || b?.startAt || 0) - new Date(a?.createdAt || a?.startAt || 0))[0] || null;
+      }
+      const targetId = Number(task?.id || id);
+      const idx = getTaskListIndexByTaskId(targetId);
+      if (idx >= 0) {
+        tasksPage = Math.floor(idx / Math.max(1, Number(tasksPageSize || 10))) + 1;
+        renderTasksPage();
+      }
+      const node = document.querySelector(`#tasks li[data-entity="tasks"][data-id="${targetId}"]`);
+      if (node) { highlightElement(node); return true; }
+      const groupMemberNode = document.querySelector(`#tasks [data-task-member-id="${targetId}"]`);
+      if (groupMemberNode) {
+        const details = groupMemberNode.closest('[data-group-details]');
+        if (details && details.style.display === 'none') {
+          const groupLi = details.closest('li[data-entity="tasks-group"]');
+          const toggleBtn = groupLi?.querySelector('.task-group-toggle');
+          toggleBtn?.click();
+        }
+        setTimeout(() => {
+          const memberNodeNow = document.querySelector(`#tasks [data-task-member-id="${targetId}"]`);
+          if (memberNodeNow) highlightElement(memberNodeNow);
+        }, 30);
+        return true;
+      }
+      if (task) {
+        openTaskEditModal(task);
+        return true;
+      }
+      return false;
+    }
+    if (entity === 'payments' || entity === 'bank-accounts') {
+      showTab('payments');
+      try { await fetchPayments(); } catch {}
+      let payment = Number.isFinite(id) ? (allPayments || []).find((p) => Number(p.id) === id) : null;
+      if (!payment && nameHint) {
+        payment = [...(allPayments || [])]
+          .filter((p) => String(p?.title || '').trim().toLowerCase() === nameHint.toLowerCase())
+          .sort((a, b) => new Date(b?.createdAt || 0) - new Date(a?.createdAt || 0))[0] || null;
+      }
+      const targetId = Number(payment?.id || id);
+      const idx = (filteredPayments || []).findIndex((p) => Number(p.id) === targetId);
+      if (idx >= 0) {
+        paymentsPage = Math.floor(idx / Math.max(1, Number(paymentsPageSize || 10))) + 1;
+        renderPaymentsPage();
+      }
+      const node = document.querySelector(`#payments li[data-entity="payments"][data-id="${targetId}"]`);
+      if (node) { highlightElement(node); return true; }
+      return false;
+    }
+    if (entity === 'errors') {
+      showTab('notes');
+      setNotesSubtab('errors');
+      try { await refreshErrorsEverywhere(); } catch {}
+      let err = Number.isFinite(id) ? (allErrors || []).find((e) => Number(e.id) === id) : null;
+      if (!err && nameHint) {
+        err = [...(allErrors || [])]
+          .filter((e) => String(e?.title || '').trim().toLowerCase() === nameHint.toLowerCase())
+          .sort((a, b) => new Date(b?.createdAt || 0) - new Date(a?.createdAt || 0))[0] || null;
+      }
+      const targetId = Number(err?.id || id);
+      const idx = (filteredErrors || []).findIndex((e) => Number(e.id) === targetId);
+      if (idx >= 0) {
+        errorsPage = Math.floor(idx / Math.max(1, Number(errorsPageSize || 10))) + 1;
+        renderErrorsPage();
+      }
+      const node = document.querySelector(`#notes-errors-list li[data-entity="errors"][data-id="${targetId}"], #errors li[data-entity="errors"][data-id="${targetId}"]`);
+      if (node) { highlightElement(node); return true; }
+      return false;
+    }
+    if (entity === 'notes') {
+      showTab('notes');
+      setNotesSubtab('notes');
+      const targetId = Number.isFinite(id) ? id : null;
+      if (typeof window.focusNoteById === 'function') {
+        try {
+          const ok = await window.focusNoteById(targetId || nameHint);
+          if (ok) return true;
+        } catch {}
+      }
+      if (typeof window.fetchNotes === 'function') { try { window.fetchNotes(); } catch {} }
+      const node = targetId != null ? document.querySelector(`#notes li[data-id="${targetId}"]`) : null;
+      if (node) { highlightElement(node); return true; }
+      return false;
+    }
+    return false;
+  }
+  function queueClientNotification(message, kind = 'tasks', key = '', opts = {}) {
+    if (!isAdminUser()) return;
+    try {
+      const list = Array.isArray(activityLatestItems) ? activityLatestItems : [];
+      const dedupKey = String(key || '').trim();
+      const action = String(opts?.action || 'ALERT').toUpperCase();
+      const entityId = Number.isFinite(Number(opts?.entityId)) ? Number(opts.entityId) : null;
+      const msgNorm = String(message || '').trim().toLowerCase();
+      if (dedupKey) {
+        const existsByKey = list.some((x) => String(x?.metadata?.dedupKey || '').trim() === dedupKey);
+        if (existsByKey) return;
+      }
+      const nowTs = Date.now();
+      const existsRecentSimilar = list.some((x) => {
+        if (!x) return false;
+        if (String(x?.entity || '').toLowerCase() !== String(kind || '').toLowerCase()) return false;
+        const xAction = String(x?.action || '').toUpperCase();
+        if (xAction !== action) return false;
+        const xId = Number.isFinite(Number(x?.entityId)) ? Number(x.entityId) : null;
+        if (xId !== entityId) return false;
+        const txt = String(asFriendlyNotification(x) || '').trim().toLowerCase();
+        if (txt !== msgNorm) return false;
+        const ts = new Date(x?.createdAt || 0).getTime();
+        return Number.isFinite(ts) && Math.abs(nowTs - ts) <= 180000;
+      });
+      if (existsRecentSimilar) return;
+      const id = `client-${Date.now()}-${Math.random().toString(36).slice(2,7)}`;
+      const createdAt = new Date().toISOString();
+      const item = {
+        id,
+        action,
+        entity: kind,
+        entityId,
+        createdAt,
+        metadata: { displayName: message, source: 'client', dedupKey: dedupKey || null },
+        user: getAuthUser() ? { email: getAuthUser().email, role: getAuthUser().role } : null,
+      };
+      list.unshift(item);
+      activityLatestItems = dedupeNotifications(list);
+      setActivityItemsCached(activityLatestItems);
+      const unread = getActivityUnreadCached() + 1;
+      renderActivityBell(unread);
+      if (document.querySelector('[data-tab="activity"]')?.classList.contains('active')) {
+        fetchActivityLogs(false);
+      }
+    } catch {}
+  }
+  function closeBellDropdownAnimated() {
+    const dropdown = document.getElementById('activity-bell-dropdown');
+    if (!dropdown || dropdown.style.display === 'none') return;
+    if (bellOutsideClickHandler) {
+      document.removeEventListener('click', bellOutsideClickHandler, true);
+      bellOutsideClickHandler = null;
+    }
+    if (bellKeydownHandler) {
+      document.removeEventListener('keydown', bellKeydownHandler, true);
+      bellKeydownHandler = null;
+    }
+    dropdown.style.opacity = '0';
+    dropdown.style.transform = 'translateY(-10px) scale(.97)';
+    setTimeout(() => {
+      dropdown.style.display = 'none';
+    }, 460);
+  }
+  function openBellNotifications(evt) {
+    evt?.stopPropagation?.();
+    if (!isAdminUser()) return;
+    let dropdown = document.getElementById('activity-bell-dropdown');
+    if (!dropdown) {
+      dropdown = document.createElement('div');
+      dropdown.id = 'activity-bell-dropdown';
+      dropdown.style.position = 'fixed';
+      dropdown.style.right = '18px';
+      dropdown.style.top = '64px';
+      dropdown.style.width = 'min(420px, 92vw)';
+      dropdown.style.maxHeight = '64vh';
+      dropdown.style.overflow = 'auto';
+      dropdown.style.zIndex = '10025';
+      dropdown.style.border = '1px solid rgba(125,211,252,.42)';
+      dropdown.style.borderRadius = '14px';
+      dropdown.style.background = 'linear-gradient(180deg, rgba(7,26,52,0.98), rgba(8,33,74,0.96))';
+      dropdown.style.boxShadow = '0 24px 55px rgba(2,132,199,.28), 0 0 0 1px rgba(56,189,248,.18) inset';
+      dropdown.style.padding = '12px';
+      dropdown.style.transition = 'opacity .32s ease, transform .32s ease';
+      document.body.appendChild(dropdown);
+    }
+    const isOpen = dropdown.style.display === 'block';
+    if (isOpen) { closeBellDropdownAnimated(); return; }
+    if (!activityLatestItems.length) activityLatestItems = getActivityItemsCached();
+    const renderBellDropdown = () => {
+      const showUnreadOnly = dropdown.dataset.filter === 'unread';
+      const all = activityLatestItems.slice(0, 120);
+      const filtered = showUnreadOnly ? all.filter((it) => isUnreadNotification(it)) : all;
+      const groupedAll = groupBellItems(filtered);
+      const pinnedSet = getActivityPinnedKeysCached();
+      groupedAll.sort((a, b) => {
+        const ka = getNotificationIdentity(a?.item);
+        const kb = getNotificationIdentity(b?.item);
+        const pa = pinnedSet.has(ka) ? 1 : 0;
+        const pb = pinnedSet.has(kb) ? 1 : 0;
+        if (pb !== pa) return pb - pa;
+        return new Date(b?.newestAt || 0) - new Date(a?.newestAt || 0);
+      });
+      const maxGroups = 12;
+      const grouped = groupedAll.slice(0, maxGroups);
+      const hiddenGroups = Math.max(0, groupedAll.length - grouped.length);
+      const hiddenItems = hiddenGroups > 0 ? groupedAll.slice(grouped.length).reduce((acc, g) => acc + (Number(g?.count || 0) || 0), 0) : 0;
+      dropdown.innerHTML = `
+        <div style="display:flex; align-items:center; justify-content:space-between; margin-bottom:8px; gap:8px; flex-wrap:wrap;">
+          <strong style="color:#e0f2fe;">Notificaciones</strong>
+          <div style="display:flex; gap:6px; flex-wrap:wrap; justify-content:flex-end;">
+            <button id="bell-filter" class="btn btn-neutral" type="button" style="padding:4px 8px; font-size:11px; border-radius:8px; background:linear-gradient(135deg,#0f766e,#0369a1); border:1px solid rgba(125,211,252,.35);">${showUnreadOnly ? 'Ver todas' : 'Ver no leídas'}</button>
+            <button id="bell-mark-read" class="btn btn-neutral" type="button" style="padding:4px 8px; font-size:11px; border-radius:8px; background:linear-gradient(135deg,#0ea5e9,#2563eb); border:1px solid rgba(125,211,252,.35);">Marcar leídas</button>
+            <button id="bell-clear" class="btn btn-neutral" type="button" style="padding:4px 8px; font-size:11px; border-radius:8px; background:linear-gradient(135deg,#334155,#1e293b); border:1px solid rgba(148,163,184,.35);">Limpiar</button>
+            <button id="bell-open-activity" class="btn btn-neutral" type="button" style="padding:4px 8px; font-size:11px; border-radius:8px; background:linear-gradient(135deg,#1e40af,#1d4ed8); border:1px solid rgba(125,211,252,.35);">Ver actividad</button>
+          </div>
+        </div>
+        <div>${grouped.length ? grouped.map((g) => {
+          const abs = g?.newestAt ? formatDateTime(g.newestAt) : '-';
+          const rel = g?.newestAt ? formatRelativeTime(g.newestAt) : '-';
+          const countTxt = g.count > 1 ? ` (${g.count})` : '';
+          const unreadBadge = g.unreadCount > 0 ? `<span style="margin-left:6px; padding:1px 6px; border-radius:999px; background:#1d4ed8; color:#dbeafe; font-size:10px; font-weight:800;">${g.unreadCount}</span>` : '';
+          const ent = String(g?.item?.entity || '').toLowerCase();
+          const entId = g?.item?.entityId != null ? String(g.item.entityId) : '';
+          const action = String(g?.item?.action || '').toUpperCase();
+          const hint = extractNotificationName(g?.item);
+          const canTargetByIdOrName = !!entId || !!hint;
+          const clickable = !!ent && canTargetByIdOrName && action !== 'DELETE' && ['tasks','payments','bank-accounts','notes','errors'].includes(ent);
+          const notifKey = getNotificationIdentity(g.item);
+          const isPinned = pinnedSet.has(notifKey);
+          const leadIcon = getNotificationLeadIcon(g?.item);
+          const actId = g?.item?.id != null ? String(g.item.id) : '';
+          return `<div class="bell-notif-item" data-notif-key="${escapeHtml(notifKey)}" data-activity-id="${escapeHtml(actId)}" data-entity="${escapeHtml(ent)}" data-entity-id="${escapeHtml(entId)}" data-action="${escapeHtml(action)}" data-clickable="${clickable ? '1' : '0'}" style="padding:8px 10px; border:1px solid ${isPinned ? 'rgba(125,211,252,.75)' : 'rgba(56,189,248,.28)'}; border-radius:10px; margin-bottom:8px; background:linear-gradient(180deg, rgba(7,19,41,.96), rgba(8,29,58,.92)); box-shadow:${isPinned ? '0 10px 24px rgba(14,165,233,.28), 0 0 0 1px rgba(125,211,252,.25) inset' : '0 8px 20px rgba(2,132,199,.14)'}; transition:all .22s ease; ${clickable ? 'cursor:pointer;' : 'cursor:default; opacity:.92;'}">
+            <div style="display:flex; align-items:center; justify-content:space-between; gap:8px;">
+              <div style="color:#e2e8f0; font-size:13px; font-weight:700; display:flex; align-items:center; gap:4px; min-width:0;">${isPinned ? '<span title="Anclada">📌</span>' : ''}${leadIcon ? `<span title="Eliminado">${leadIcon}</span>` : ''}${escapeHtml(g.text + countTxt)}${unreadBadge}</div>
+              <div style="display:inline-flex; align-items:center; gap:6px;">
+                <button class="bell-pin-btn btn btn-neutral" type="button" data-notif-key="${escapeHtml(notifKey)}" title="${isPinned ? 'Desanclar' : 'Anclar'}" aria-label="${isPinned ? 'Desanclar' : 'Anclar'}" style="width:24px; height:24px; padding:0; font-size:12px; border-radius:999px; display:inline-flex; align-items:center; justify-content:center; background:${isPinned ? 'linear-gradient(135deg,#0ea5e9,#2563eb)' : 'linear-gradient(135deg,#334155,#1e293b)'}; border:1px solid rgba(125,211,252,.35); color:#e2e8f0;">${isPinned ? '📍' : '📌'}</button>
+                <button class="bell-remove-btn btn btn-neutral" type="button" data-notif-key="${escapeHtml(notifKey)}" data-activity-id="${escapeHtml(actId)}" title="Eliminar notificación" aria-label="Eliminar notificación" style="width:24px; height:24px; padding:0; font-size:12px; border-radius:999px; display:inline-flex; align-items:center; justify-content:center; background:linear-gradient(135deg,#7f1d1d,#991b1b); border:1px solid rgba(248,113,113,.45); color:#fee2e2;">🗑️</button>
+              </div>
+            </div>
+            <div style="color:#93c5fd; font-size:11px; margin-top:2px;">${escapeHtml(rel)} · ${escapeHtml(abs)}</div>
+          </div>`;
+        }).join('') : '<div style="color:#94a3b8; padding:10px;">Sin notificaciones</div>'}
+        ${hiddenGroups > 0 ? `<div style="padding:8px 10px; border:1px dashed #334155; border-radius:10px; margin-top:6px; color:#93c5fd; font-size:12px; text-align:center;">+${hiddenGroups} grupos (${hiddenItems} notificaciones) más</div>` : ''}
+        </div>
+      `;
+      dropdown.querySelector('#bell-open-activity')?.addEventListener('click', () => {
+        closeBellDropdownAnimated();
+        showTab('activity');
+        fetchActivityLogs(false);
+      });
+      dropdown.querySelector('#bell-filter')?.addEventListener('click', () => {
+        dropdown.dataset.filter = showUnreadOnly ? 'all' : 'unread';
+        renderBellDropdown();
+      });
+      dropdown.querySelector('#bell-mark-read')?.addEventListener('click', () => {
+        const newest = activityLatestItems[0]?.createdAt ? String(activityLatestItems[0].createdAt) : new Date().toISOString();
+        clearAllReadNotifications();
+        setActivitySeenAt(newest);
+        renderActivityBell(0);
+        renderBellDropdown();
+        showToast('Notificaciones marcadas como leídas', 'neutral');
+      });
+      dropdown.querySelector('#bell-clear')?.addEventListener('click', async () => {
+        try {
+          const res = await fetch('/activity-logs', { method: 'DELETE' });
+          if (!res.ok) throw new Error(await res.text());
+        } catch (err) {
+          console.error(err);
+          showToast('No se pudieron limpiar las notificaciones', 'danger');
+          return;
+        }
+        const nodes = [...dropdown.querySelectorAll('.bell-notif-item')];
+        nodes.forEach((n, i) => {
+          setTimeout(() => {
+            n.style.opacity = '0';
+            n.style.transform = 'translateY(-10px) scale(.97)';
+          }, i * 45);
+        });
+        setTimeout(() => {
+          activityLatestItems = [];
+          clearAllReadNotifications();
+          setActivityItemsCached([]);
+          setActivitySeenAt(new Date().toISOString());
+          renderActivityBell(0);
+          closeBellDropdownAnimated();
+          showToast('Notificaciones eliminadas', 'neutral');
+        }, Math.max(380, nodes.length * 50));
+      });
+      dropdown.querySelectorAll('.bell-pin-btn').forEach((btn) => {
+        btn.addEventListener('click', (e) => {
+          e.preventDefault();
+          e.stopPropagation();
+          const k = btn.getAttribute('data-notif-key') || '';
+          togglePinnedNotificationKey(k);
+          renderBellDropdown();
+        });
+      });
+      dropdown.querySelectorAll('.bell-remove-btn').forEach((btn) => {
+        btn.addEventListener('click', async (e) => {
+          e.preventDefault();
+          e.stopPropagation();
+          const k = btn.getAttribute('data-notif-key') || '';
+          const activityId = Number(btn.getAttribute('data-activity-id') || 0) || 0;
+          if (!k) return;
+          if (activityId > 0) {
+            try {
+              const res = await fetch('/activity-logs/' + activityId, { method: 'DELETE' });
+              if (!res.ok) throw new Error(await res.text());
+            } catch (err) {
+              console.error(err);
+              showToast('No se pudo eliminar la notificación', 'danger');
+              return;
+            }
+          }
+          activityLatestItems = (activityLatestItems || []).filter((it) => getNotificationIdentity(it) !== k);
+          setActivityItemsCached(activityLatestItems);
+          const pinned = getActivityPinnedKeysCached();
+          if (pinned.has(k)) {
+            pinned.delete(k);
+            setActivityPinnedKeysCached(pinned);
+          }
+          const read = getActivityReadIdsCached();
+          if (read.has(k)) {
+            read.delete(k);
+            setActivityReadIdsCached(read);
+          }
+          const unreadNow = (activityLatestItems || []).filter((it) => isUnreadNotification(it)).length;
+          renderActivityBell(unreadNow);
+          renderBellDropdown();
+        });
+      });
+      dropdown.querySelectorAll('.bell-notif-item').forEach((row) => {
+        row.addEventListener('click', async (e) => {
+          if (row.getAttribute('data-clickable') !== '1') return;
+          const key = row.getAttribute('data-notif-key') || '';
+          const entity = row.getAttribute('data-entity') || '';
+          const entityId = row.getAttribute('data-entity-id') || '';
+          const notifItem = (activityLatestItems || []).find((it) => getNotificationIdentity(it) === key) || null;
+          if (key) {
+            const set = getActivityReadIdsCached();
+            set.add(key);
+            setActivityReadIdsCached(set);
+          }
+          const unreadNow = (activityLatestItems || []).filter((it) => isUnreadNotification(it)).length;
+          renderActivityBell(unreadNow);
+          if (!entity) return;
+          closeBellDropdownAnimated();
+          const ok = await jumpToNotificationTarget(entity, entityId, notifItem);
+          if (!ok) {
+            await showMessageModal('El item relacionado ya no está disponible.', { title: 'No disponible' });
+          }
+        });
+      });
+    };
+    if (!dropdown.dataset.filter) dropdown.dataset.filter = 'all';
+    renderBellDropdown();
+    dropdown.style.display = 'block';
+    dropdown.style.opacity = '0';
+    dropdown.style.transform = 'translateY(-6px) scale(.98)';
+    requestAnimationFrame(() => {
+      dropdown.style.opacity = '1';
+      dropdown.style.transform = 'translateY(0) scale(1)';
+    });
+    if (bellOutsideClickHandler) {
+      document.removeEventListener('click', bellOutsideClickHandler, true);
+      bellOutsideClickHandler = null;
+    }
+    if (bellKeydownHandler) {
+      document.removeEventListener('keydown', bellKeydownHandler, true);
+      bellKeydownHandler = null;
+    }
+    bellOutsideClickHandler = (e) => {
+      if (!dropdown.contains(e.target) && e.target !== activityBellBtn) closeBellDropdownAnimated();
+    };
+    bellKeydownHandler = (e) => {
+      const key = String(e.key || '');
+      const isSpace = key === ' ' || key === 'Spacebar';
+      if (!(key === 'Escape' || isSpace)) return;
+      const t = e.target;
+      if (t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.tagName === 'SELECT' || t.isContentEditable)) return;
+      e.preventDefault();
+      closeBellDropdownAnimated();
+    };
+    document.addEventListener('click', bellOutsideClickHandler, true);
+    document.addEventListener('keydown', bellKeydownHandler, true);
+    // Abrir campana ya no marca como leídas automáticamente.
+  }
+  async function fetchActivityLogs(markSeen = false) {
+    if (!activityListEl) return;
+    if (!isAdminUser()) {
+      activityListEl.innerHTML = '<li>Solo ADMIN puede ver actividad.</li>';
+      renderActivityBell(0, false);
+      return;
+    }
+    const limit = Number(activityLimitSel?.value || 100) || 100;
+    activityListEl.innerHTML = '<li>Cargando actividad...</li>';
+    try {
+      const res = await fetch('/activity-logs?limit=' + encodeURIComponent(String(limit)));
+      if (!res.ok) throw new Error(await res.text());
+      const rows = await res.json();
+      const items = Array.isArray(rows) ? rows : [];
+      const prevClient = (Array.isArray(activityLatestItems) ? activityLatestItems : []).filter((x) => x?.metadata?.source === 'client');
+      const serverTexts = new Set(items.map((it) => String(asFriendlyNotification(it) || '').trim().toLowerCase()).filter(Boolean));
+      const prevClientFiltered = prevClient.filter((it) => !serverTexts.has(String(asFriendlyNotification(it) || '').trim().toLowerCase()));
+      const merged = [...prevClientFiltered, ...items];
+      const nextItems = dedupeNotifications(merged);
+      if (nextItems.length) {
+        activityLatestItems = nextItems;
+        setActivityItemsCached(activityLatestItems);
+      } else if (!activityLatestItems.length) {
+        activityLatestItems = getActivityItemsCached();
+      }
+      if (activityTypeSummaryEl) {
+        const colors = {
+          auth: { bg: '#0b3a63', fg: '#bae6fd' },
+          tasks: { bg: '#3f6212', fg: '#dcfce7' },
+          payments: { bg: '#7c2d12', fg: '#ffedd5' },
+          notes: { bg: '#4c1d95', fg: '#ede9fe' },
+          errors: { bg: '#7f1d1d', fg: '#fee2e2' },
+          other: { bg: '#334155', fg: '#e2e8f0' },
+        };
+        const counts = { auth: 0, tasks: 0, payments: 0, notes: 0, errors: 0, other: 0 };
+        activityLatestItems.forEach((it) => {
+          const e = String(it?.entity || '').toLowerCase();
+          if (e === 'auth') counts.auth += 1;
+          else if (e === 'tasks') counts.tasks += 1;
+          else if (e === 'payments' || e === 'bank-accounts') counts.payments += 1;
+          else if (e === 'notes') counts.notes += 1;
+          else if (e === 'errors') counts.errors += 1;
+          else counts.other += 1;
+        });
+        const label = { auth: 'Auth', tasks: 'Tasks', payments: 'Payments', notes: 'Notas', errors: 'Errores', other: 'Otros' };
+        activityTypeSummaryEl.innerHTML = Object.keys(counts).map((k) => {
+          const v = counts[k];
+          const c = colors[k];
+          return `<span style="display:inline-flex; align-items:center; gap:6px; padding:5px 10px; border-radius:999px; border:1px solid rgba(148,163,184,.35); background:${c.bg}; color:${c.fg}; font-size:12px; font-weight:700;">${label[k]}: ${v}</span>`;
+        }).join('');
+      }
+      const lastSeen = getActivitySeenAt();
+      const unread = activityLatestItems.filter((it) => {
+        if (!it?.createdAt || !lastSeen) return !!it?.createdAt && !lastSeen;
+        return new Date(it.createdAt).getTime() > new Date(lastSeen).getTime();
+      }).length;
+      renderActivityBell(unread);
+      if (markSeen) {
+        const newest = items[0]?.createdAt ? String(items[0].createdAt) : new Date().toISOString();
+        clearAllReadNotifications();
+        setActivitySeenAt(newest);
+        renderActivityBell(0);
+      }
+      if (!activityLatestItems.length) {
+        activityListEl.innerHTML = '<li>Sin registros</li>';
+        return;
+      }
+      activityListEl.innerHTML = activityLatestItems.slice(0, limit).map((it) => {
+        const at = it?.createdAt ? formatDateTime(it.createdAt) : '-';
+        const who = it?.user?.email || 'anon';
+        const role = it?.user?.role || '-';
+        const friendly = asFriendlyNotification(it);
+        const leadIcon = getNotificationLeadIcon(it);
+        return `<li style="padding:8px 10px; border:1px solid #1f2937; border-radius:10px; margin-bottom:8px; background:#0b1220;">
+          <div style="display:flex; justify-content:space-between; gap:8px; color:#cbd5e1; font-size:12px;">
+            <strong>${leadIcon ? `${escapeHtml(leadIcon)} ` : ''}${escapeHtml(friendly)}</strong>
+            <span style="color:#94a3b8;">${escapeHtml(at)}</span>
+          </div>
+          <div style="margin-top:4px; color:#93c5fd; font-size:12px;">${escapeHtml(who)} · ${escapeHtml(role)}</div>
+        </li>`;
+      }).join('');
+    } catch (err) {
+      console.error(err);
+      activityListEl.innerHTML = '<li>Error cargando actividad</li>';
+    }
+  }
+  function setAuthSession(token, user) {
+    try {
+      localStorage.setItem(AUTH_TOKEN_KEY, token || '');
+      localStorage.setItem(AUTH_USER_KEY, JSON.stringify(user || null));
+    } catch {}
+    renderAuthState();
+    refreshUiByRole();
+  }
+  function clearAuthSession() {
+    try {
+      localStorage.removeItem(AUTH_TOKEN_KEY);
+      localStorage.removeItem(AUTH_USER_KEY);
+    } catch {}
+    renderAuthState();
+    refreshUiByRole();
+  }
+  function renderAuthState() {
+    const user = getAuthUser();
+    const logged = !!getAuthToken() && !!user;
+    if (authOpenBtn) authOpenBtn.style.display = logged ? 'none' : 'inline-flex';
+    if (authLogoutBtn) authLogoutBtn.style.display = 'none';
+    if (appMenuBtn) appMenuBtn.style.display = logged ? 'inline-flex' : 'none';
+    if (authUserBadge) authUserBadge.textContent = logged ? `${user.email} · ${user.role}` : '';
+    if (profilesTabBtn) profilesTabBtn.classList.toggle('hidden', !isAdminUser());
+    if (activityTabBtn) activityTabBtn.classList.toggle('hidden', !isAdminUser());
+    if (activityBellWrap) activityBellWrap.classList.toggle('hidden', !isAdminUser());
+    if (isAdminUser()) {
+      sanitizeActivityCacheForCurrentUser();
+    }
+    if (!isAdminUser() && activityTabBtn?.classList.contains('active')) showTab('notes');
+  }
+  function openAuthModal() {
+    let overlay = document.getElementById('auth-overlay');
+    if (!overlay) {
+      overlay = document.createElement('div');
+      overlay.id = 'auth-overlay';
+      overlay.style.position = 'fixed';
+      overlay.style.inset = '0';
+      overlay.style.background = 'rgba(2,6,23,0.6)';
+      overlay.style.backdropFilter = 'blur(7px)';
+      overlay.style.display = 'none';
+      overlay.style.alignItems = 'center';
+      overlay.style.justifyContent = 'center';
+      overlay.style.zIndex = '10030';
+      overlay.innerHTML = `
+        <div style="width:min(420px,92vw); border:1px solid rgba(186,230,253,.45); border-radius:12px; background:linear-gradient(180deg,#2c9ed8,#3b4fbf); box-shadow:0 16px 42px rgba(0,0,0,.45); overflow:hidden;">
+          <div style="padding:18px 22px 16px; text-align:center;">
+            <div style="width:64px; height:64px; margin:0 auto 10px; border-radius:999px; border:1px solid rgba(219,234,254,.7); display:flex; align-items:center; justify-content:center; color:#e2e8f0; font-size:26px;">👤</div>
+            <div id="auth-title" style="color:#f8fafc; font-size:30px; font-weight:300; letter-spacing:.2px;">Sign in</div>
+            <div style="margin-top:18px; display:grid; gap:14px;">
+              <input id="auth-modal-id" placeholder="Username or email" style="height:42px; border:none; border-bottom:1px solid rgba(226,232,240,.65); background:transparent; color:#f8fafc; padding:0 4px; outline:none;" />
+              <input id="auth-modal-password" type="password" placeholder="Password" style="height:42px; border:none; border-bottom:1px solid rgba(226,232,240,.65); background:transparent; color:#f8fafc; padding:0 4px; outline:none;" />
+            </div>
+            <div id="auth-modal-error" style="display:none; margin-top:10px; padding:8px 10px; border:1px solid rgba(127,29,29,.8); border-radius:8px; background:rgba(127,29,29,.28); color:#fee2e2; font-size:12px;"></div>
+            <button id="auth-modal-submit" type="button" style="margin-top:18px; min-width:110px; height:34px; border:1px solid rgba(226,232,240,.75); border-radius:4px; background:rgba(15,23,42,.28); color:#fff; cursor:pointer;">Login</button>
+            <div style="margin-top:12px; font-size:12px; color:#e2e8f0;">
+              <a href="#" id="auth-register-link" style="color:#e2e8f0; text-decoration:none;">Register now</a>
+              <span style="opacity:.75;"> · </span>
+              <a href="#" id="auth-reset-link" style="color:#e2e8f0; text-decoration:none;">Reset password</a>
+            </div>
+            <button id="auth-modal-close" type="button" style="margin-top:10px; border:none; background:transparent; color:#e2e8f0; cursor:pointer; opacity:.9;">Cerrar</button>
+          </div>
+        </div>`;
+      document.body.appendChild(overlay);
+    }
+    const close = () => { overlay.style.display = 'none'; };
+    overlay.style.display = 'flex';
+    const idEl = overlay.querySelector('#auth-modal-id');
+    const passEl = overlay.querySelector('#auth-modal-password');
+    const submitEl = overlay.querySelector('#auth-modal-submit');
+    const titleEl = overlay.querySelector('#auth-title');
+    const registerLink = overlay.querySelector('#auth-register-link');
+    const resetLink = overlay.querySelector('#auth-reset-link');
+    const closeEl = overlay.querySelector('#auth-modal-close');
+    const errorEl = overlay.querySelector('#auth-modal-error');
+    let mode = 'login';
+    const paintMode = () => {
+      const isRegister = mode === 'register';
+      if (titleEl) titleEl.textContent = isRegister ? 'Register' : 'Sign in';
+      if (submitEl) submitEl.textContent = isRegister ? 'Register' : 'Login';
+      if (idEl) idEl.placeholder = isRegister ? 'Email' : 'Username or email';
+      if (registerLink) registerLink.textContent = isRegister ? 'Back to login' : 'Register now';
+      if (passEl) passEl.value = '';
+      if (errorEl) { errorEl.style.display = 'none'; errorEl.textContent = ''; }
+    };
+    paintMode();
+    applyLoginStyleToInputs(overlay);
+    [idEl, passEl].forEach((inp) => {
+      inp?.addEventListener('focus', () => { inp.style.borderBottomColor = '#ffffff'; inp.style.boxShadow = '0 10px 20px -16px rgba(255,255,255,.9)'; });
+      inp?.addEventListener('blur', () => { inp.style.borderBottomColor = 'rgba(226,232,240,.65)'; inp.style.boxShadow = 'none'; });
+    });
+    closeEl.onclick = () => close();
+    overlay.onclick = (e) => { if (e.target === overlay) close(); };
+    registerLink.onclick = (e) => { e.preventDefault(); mode = mode === 'login' ? 'register' : 'login'; paintMode(); };
+    submitEl.onclick = async () => {
+      const identifier = String(idEl?.value || '').trim();
+      const password = String(passEl?.value || '').trim();
+      if (!identifier || !password) {
+        if (errorEl) { errorEl.style.display = 'block'; errorEl.textContent = 'Completa usuario/email y password'; }
+        return;
+      }
+      try {
+        const endpoint = mode === 'register' ? '/auth/register' : '/auth/login';
+        const body = mode === 'register'
+          ? { email: identifier.toLowerCase(), password }
+          : { identifier, email: identifier.includes('@') ? identifier.toLowerCase() : undefined, password };
+        const res = await fetch(endpoint, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+        if (!res.ok) throw new Error(await res.text());
+        const data = await res.json();
+        setAuthSession(data.token, data.user);
+        showToast(mode === 'register' ? 'Usuario registrado' : 'Sesion iniciada', 'success');
+        close();
+      } catch (err) {
+        let detail = mode === 'register' ? 'No se pudo registrar' : 'Credenciales inválidas';
+        try {
+          const parsed = JSON.parse(String(err?.message || ''));
+          if (parsed?.message) detail = Array.isArray(parsed.message) ? parsed.message.join(', ') : String(parsed.message);
+        } catch {}
+        if (errorEl) { errorEl.style.display = 'block'; errorEl.textContent = detail; }
+      }
+    };
+    resetLink.onclick = async (e) => {
+      e.preventDefault();
+      const email = String(idEl?.value || '').trim().toLowerCase();
+      const password = String(passEl?.value || '').trim();
+      if (!email || !password) {
+        if (errorEl) { errorEl.style.display = 'block'; errorEl.textContent = 'Para reset escribe email y nueva password'; }
+        return;
+      }
+      showFormModal({
+        title: 'Reset password',
+        fields: [{ id: 'resetSecret', label: 'Reset secret', type: 'text', value: '' }],
+        onSubmit: async (values) => {
+          const resetSecret = String(values.resetSecret || '').trim();
+          const headers = { 'Content-Type': 'application/json' };
+          if (resetSecret) headers['x-reset-secret'] = resetSecret;
+          const res = await fetch('/auth/reset-password', { method: 'POST', headers, body: JSON.stringify({ email, newPassword: password }) });
+          if (!res.ok) throw new Error(await res.text());
+          showToast('Password actualizado', 'success');
+          close();
+        },
+      });
+    };
+  }
+  function openLogoutConfirmModal() {
+    let overlay = document.getElementById('logout-overlay');
+    if (!overlay) {
+      overlay = document.createElement('div');
+      overlay.id = 'logout-overlay';
+      styleModalOverlay(overlay, '10031');
+      overlay.innerHTML = `
+        <div>
+          <div style="padding:20px; text-align:center;">
+            <div style="color:#f8fafc; font-size:26px; font-weight:300;">Cerrar sesión</div>
+            <div style="margin-top:8px; color:#e2e8f0; font-size:13px;">¿Deseas salir de la sesión actual?</div>
+            <div style="display:flex; gap:10px; justify-content:center; margin-top:16px;">
+              <button id="logout-cancel" type="button" style="min-width:110px; height:34px; border:1px solid rgba(226,232,240,.75); border-radius:4px; background:rgba(15,23,42,.28); color:#fff; cursor:pointer;">Cancelar</button>
+              <button id="logout-confirm" type="button" style="min-width:110px; height:34px; border:1px solid rgba(226,232,240,.75); border-radius:4px; background:rgba(127,29,29,.45); color:#fff; cursor:pointer;">Salir</button>
+            </div>
+          </div>
+        </div>`;
+      document.body.appendChild(overlay);
+      styleModalPanel(overlay.firstElementChild, '390px');
+    }
+    return new Promise((resolve) => {
+      const close = (v) => { overlay.style.display = 'none'; resolve(v); };
+      overlay.style.display = 'flex';
+      const btnCancel = overlay.querySelector('#logout-cancel');
+      const btnConfirm = overlay.querySelector('#logout-confirm');
+      const onOverlay = (e) => { if (e.target === overlay) close(false); };
+      overlay.onclick = onOverlay;
+      btnCancel.onclick = () => close(false);
+      btnConfirm.onclick = () => close(true);
+    });
+  }
+  function inferEntityFromUrl(url) {
+    const path = String(url || '').replace(window.location.origin, '');
+    if (path.startsWith('/tasks')) return 'tasks';
+    if (path.startsWith('/payments') || path.startsWith('/bank-accounts')) return 'payments';
+    if (path.startsWith('/notes')) return 'notes';
+    if (path.startsWith('/errors')) return 'errors';
+    if (path.startsWith('/auth')) return 'auth';
+    return 'other';
+  }
+  function inferDisplayNameFromRequest(init = {}) {
+    try {
+      const headers = new Headers(init.headers || {});
+      const h = headers.get('x-entity-name');
+      if (h) {
+        try { return decodeURIComponent(h); } catch { return String(h); }
+      }
+    } catch {}
+    try {
+      const bodyRaw = init?.body;
+      if (typeof bodyRaw === 'string' && bodyRaw.trim()) {
+        const p = JSON.parse(bodyRaw);
+        const n = p?.title || p?.name || p?.content || '';
+        return String(n || '').trim().slice(0, 80);
+      }
+    } catch {}
+    return '';
+  }
+  function queueCrudNotificationFromRequest(url, method, init = {}) {
+    // Sin-op para evitar duplicados con activity-logs del backend.
+    return;
+  }
+  (function installAuthFetchWrapper(){
+    const nativeFetch = window.fetch.bind(window);
+    window.fetch = (input, init = {}) => {
+      try {
+        const token = getAuthToken();
+        const url = typeof input === 'string' ? input : String(input?.url || '');
+        const isAppUrl = url.startsWith('/') || url.startsWith(window.location.origin);
+        const method = String(init?.method || (typeof input !== 'string' ? input?.method : '') || 'GET').toUpperCase();
+        const isMutating = ['POST', 'PUT', 'PATCH', 'DELETE'].includes(method);
+        const isActivityRead = url.includes('/activity-logs');
+        const scheduleBellRefresh = () => {
+          if (!isAppUrl || !isMutating || isActivityRead) return;
+          queueCrudNotificationFromRequest(url, method, init);
+          setTimeout(() => {
+            try { if (isAdminUser()) fetchActivityLogs(false); } catch {}
+          }, 450);
+        };
+        if (token && isAppUrl) {
+          const headers = new Headers(init.headers || (input && input.headers) || undefined);
+          if (!headers.has('Authorization')) headers.set('Authorization', `Bearer ${token}`);
+          return nativeFetch(input, { ...init, headers }).then((res) => {
+            if (res.ok) scheduleBellRefresh();
+            return res;
+          });
+        }
+      } catch {}
+      return nativeFetch(input, init).then((res) => {
+        try {
+          const url = typeof input === 'string' ? input : String(input?.url || '');
+          const isAppUrl = url.startsWith('/') || url.startsWith(window.location.origin);
+          const method = String(init?.method || (typeof input !== 'string' ? input?.method : '') || 'GET').toUpperCase();
+          const isMutating = ['POST', 'PUT', 'PATCH', 'DELETE'].includes(method);
+          if (res.ok && isAppUrl && isMutating && !url.includes('/activity-logs')) {
+            queueCrudNotificationFromRequest(url, method, init);
+            setTimeout(() => {
+              try { if (isAdminUser()) fetchActivityLogs(false); } catch {}
+            }, 450);
+          }
+        } catch {}
+        return res;
+      });
+    };
+  })();
   function loadPinnedTasks(){
     try {
       const raw = localStorage.getItem(PINNED_TASKS_KEY);
@@ -217,13 +1425,184 @@ document.addEventListener('DOMContentLoaded', () => {
   document.addEventListener('focusin', (e) => applyFieldGlow(e.target));
   document.addEventListener('focusout', (e) => clearFieldGlow(e.target));
   const BANKS_FIXED = ['FALABELLA', 'ESTADO', 'CHILE', 'SANTANDER'];
+  const LOGIN_MODAL_GRADIENT = 'linear-gradient(180deg,#2c9ed8,#3b4fbf)';
+  const LOGIN_INPUT_BORDER = '1px solid rgba(226,232,240,.65)';
+  const CALENDAR_THEME_VARIANT = 'vibrant'; // 'vibrant' | 'sleek'
+  const CALENDAR_THEME = CALENDAR_THEME_VARIANT === 'sleek'
+    ? {
+        gridWrapBg: 'linear-gradient(180deg, rgba(6,14,28,0.9), rgba(8,19,36,0.9))',
+        gridWrapBorder: '1px solid rgba(59,130,246,0.24)',
+        weekdaysBg: 'linear-gradient(180deg, rgba(10,25,46,0.98), rgba(8,18,34,0.98))',
+        weekdaysShadow: '0 8px 20px rgba(30,64,175,0.18)',
+        weekHeaderText: '#dbeafe',
+        weekHeaderBg: 'linear-gradient(180deg, rgba(30,64,175,0.48), rgba(30,41,59,0.58))',
+        weekHeaderBorder: '1px solid rgba(147,197,253,0.3)',
+        weekHeaderShadow: '0 6px 14px rgba(30,64,175,0.18)',
+        dayPastBg: 'linear-gradient(180deg, rgba(120,53,15,0.62), rgba(120,53,15,0.52))',
+        dayPastBorder: 'rgba(251,191,36,0.62)',
+        dayFutureBg: 'linear-gradient(180deg, rgba(8,47,73,0.62), rgba(30,64,175,0.46))',
+        dayFutureBorder: 'rgba(125,211,252,0.55)'
+      }
+    : {
+        gridWrapBg: 'linear-gradient(180deg, rgba(8,17,34,0.86), rgba(10,22,44,0.88))',
+        gridWrapBorder: '1px solid rgba(56,189,248,0.28)',
+        weekdaysBg: 'linear-gradient(180deg, rgba(8,27,58,0.98), rgba(7,20,44,0.98))',
+        weekdaysShadow: '0 8px 20px rgba(2,132,199,0.22)',
+        weekHeaderText: '#e0f2fe',
+        weekHeaderBg: 'linear-gradient(180deg, rgba(12,74,110,0.62), rgba(30,64,175,0.42))',
+        weekHeaderBorder: '1px solid rgba(125,211,252,0.35)',
+        weekHeaderShadow: '0 6px 14px rgba(2,132,199,0.22)',
+        dayPastBg: 'linear-gradient(180deg, rgba(120,53,15,0.72), rgba(146,64,14,0.62))',
+        dayPastBorder: 'rgba(251,191,36,0.75)',
+        dayFutureBg: 'linear-gradient(180deg, rgba(8,47,73,0.74), rgba(30,64,175,0.56))',
+        dayFutureBorder: 'rgba(125,211,252,0.65)'
+      };
+
+  function styleModalOverlay(overlay, zIndex = '10030', initialDisplay = 'none') {
+    if (!overlay) return;
+    overlay.style.position = 'fixed';
+    overlay.style.inset = '0';
+    overlay.style.background = 'rgba(2,6,23,0.62)';
+    overlay.style.backdropFilter = 'blur(8px)';
+    if (!overlay.style.display) overlay.style.display = initialDisplay;
+    overlay.style.alignItems = 'center';
+    overlay.style.justifyContent = 'center';
+    overlay.style.overflowY = 'auto';
+    overlay.style.padding = '16px 12px';
+    overlay.style.boxSizing = 'border-box';
+    overlay.style.zIndex = String(zIndex);
+    if (!overlay.style.transition) overlay.style.transition = 'opacity 0.24s ease, visibility 0.24s ease';
+  }
+  function styleModalPanel(panel, max = '420px') {
+    if (!panel) return;
+    panel.style.width = `min(${max}, 92vw)`;
+    panel.style.border = '1px solid rgba(186,230,253,.45)';
+    panel.style.borderRadius = '12px';
+    panel.style.background = LOGIN_MODAL_GRADIENT;
+    panel.style.boxShadow = '0 16px 42px rgba(0,0,0,.45)';
+    panel.style.color = '#f8fafc';
+    panel.style.margin = 'auto';
+    panel.style.maxHeight = 'calc(100vh - 34px)';
+  }
+  function applyLoginInputStyle(el) {
+    if (!el) return;
+    const tag = (el.tagName || '').toLowerCase();
+    const type = (el.getAttribute('type') || '').toLowerCase();
+    if (!['input', 'textarea', 'select'].includes(tag)) return;
+    if (type === 'checkbox' || type === 'radio' || type === 'file') return;
+    el.style.width = '100%';
+    el.style.boxSizing = 'border-box';
+    el.style.background = 'transparent';
+    el.style.color = '#f8fafc';
+    el.style.border = 'none';
+    el.style.borderBottom = LOGIN_INPUT_BORDER;
+    el.style.borderRadius = '0';
+    el.style.padding = '10px 4px';
+    el.style.fontSize = '16px';
+    el.style.outline = 'none';
+    if (!el.dataset.loginInputBound) {
+      el.addEventListener('focus', () => {
+        el.style.borderBottomColor = '#ffffff';
+        el.style.boxShadow = '0 12px 22px -18px rgba(255,255,255,.9)';
+      });
+      el.addEventListener('blur', () => {
+        el.style.borderBottomColor = 'rgba(226,232,240,.65)';
+        el.style.boxShadow = 'none';
+      });
+      el.dataset.loginInputBound = '1';
+    }
+  }
+  function applyLoginStyleToInputs(root) {
+    if (!root) return;
+    root.querySelectorAll('input, textarea, select').forEach((el) => applyLoginInputStyle(el));
+  }
+  function onlyDigits(v) { return String(v || '').replace(/\D/g, ''); }
+  function setMaskedDateValue(input, mode) {
+    if (!input) return;
+    const digits = onlyDigits(input.value);
+    let out = '';
+    if (mode === 'month') {
+      const d = digits.slice(0, 6);
+      if (d.length <= 4) out = d;
+      else out = `${d.slice(0, 4)}-${d.slice(4)}`;
+    } else if (mode === 'datetime') {
+      const d = digits.slice(0, 12);
+      if (d.length <= 4) out = d;
+      else if (d.length <= 6) out = `${d.slice(0, 4)}-${d.slice(4)}`;
+      else if (d.length <= 8) out = `${d.slice(0, 4)}-${d.slice(4, 6)}-${d.slice(6)}`;
+      else if (d.length <= 10) out = `${d.slice(0, 4)}-${d.slice(4, 6)}-${d.slice(6, 8)} ${d.slice(8)}`;
+      else out = `${d.slice(0, 4)}-${d.slice(4, 6)}-${d.slice(6, 8)} ${d.slice(8, 10)}:${d.slice(10)}`;
+    } else {
+      const d = digits.slice(0, 8);
+      if (d.length <= 4) out = d;
+      else if (d.length <= 6) out = `${d.slice(0, 4)}-${d.slice(4)}`;
+      else out = `${d.slice(0, 4)}-${d.slice(4, 6)}-${d.slice(6)}`;
+    }
+    input.value = out;
+  }
+  function dateHelperText(value, mode) {
+    try {
+      if (!value) return mode === 'month' ? 'Formato: AAAA-MM' : mode === 'datetime' ? 'Formato: AAAA-MM-DD HH:mm' : 'Formato: AAAA-MM-DD';
+      if (mode === 'month' && /^\d{4}-\d{2}$/.test(value)) {
+        const d = new Date(`${value}-01T12:00:00`);
+        return new Intl.DateTimeFormat('es-CL', { month: 'long', year: 'numeric' }).format(d);
+      }
+      if (mode === 'date' && /^\d{4}-\d{2}-\d{2}$/.test(value)) {
+        const d = new Date(`${value}T12:00:00`);
+        return new Intl.DateTimeFormat('es-CL', { weekday: 'long', day: '2-digit', month: 'long', year: 'numeric' }).format(d);
+      }
+      if (mode === 'datetime' && /^\d{4}-\d{2}-\d{2}[ T]\d{2}:\d{2}$/.test(value)) {
+        const d = new Date(value.replace(' ', 'T'));
+        return new Intl.DateTimeFormat('es-CL', { weekday: 'short', day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit', hour12: false }).format(d);
+      }
+    } catch {}
+    return mode === 'month' ? 'Formato: AAAA-MM' : mode === 'datetime' ? 'Formato: AAAA-MM-DD HH:mm' : 'Formato: AAAA-MM-DD';
+  }
+  function bindDateMask(input, mode = 'date', helperEl = null) {
+    if (!input || input.dataset.dateMaskBound) return;
+    input.dataset.dateMaskBound = '1';
+    const refreshHelper = () => {
+      if (!helperEl) return;
+      helperEl.textContent = dateHelperText(input.value, mode);
+      helperEl.style.color = /^(\d{4}-\d{2}$|\d{4}-\d{2}-\d{2}$|\d{4}-\d{2}-\d{2}[ T]\d{2}:\d{2}$)/.test(input.value) ? '#93c5fd' : '#94a3b8';
+    };
+    input.addEventListener('input', () => { setMaskedDateValue(input, mode); refreshHelper(); });
+    input.addEventListener('blur', refreshHelper);
+    setMaskedDateValue(input, mode);
+    refreshHelper();
+  }
+  function styleTasksCalendarModal() {
+    if (!calModal) return;
+    styleModalOverlay(calModal, '1000');
+    const panel = calModal.firstElementChild;
+    styleModalPanel(panel, '1280px');
+    if (panel) {
+      panel.style.maxHeight = '92vh';
+      panel.style.overflow = 'auto';
+      panel.style.padding = '16px';
+    }
+    const gridWrap = document.getElementById('cal-grid-wrap');
+    if (gridWrap) {
+      gridWrap.style.background = CALENDAR_THEME.gridWrapBg;
+      gridWrap.style.border = CALENDAR_THEME.gridWrapBorder;
+      gridWrap.style.borderRadius = '12px';
+      gridWrap.style.padding = '8px';
+    }
+    if (calWeekdays) {
+      calWeekdays.style.background = CALENDAR_THEME.weekdaysBg;
+      calWeekdays.style.borderRadius = '10px';
+      calWeekdays.style.padding = '6px';
+      calWeekdays.style.boxShadow = CALENDAR_THEME.weekdaysShadow;
+    }
+  }
+  styleTasksCalendarModal();
 
   function applyBtn(el, variant='primary'){ if (!el) return; el.classList.add('btn'); if (variant) el.classList.add('btn-'+variant); }
   function applyInput(el){ if (!el) return; el.classList.add('input'); }
   function applyCard(el){ if (!el) return; el.classList.add('card'); }
   const FIELD_TEXT_LIMITS = {
     title: 120,
-    description: 500,
+    description: 150,
     message: 1200,
     stack: 6000,
     solution: 500,
@@ -398,19 +1777,25 @@ document.addEventListener('DOMContentLoaded', () => {
   }
 
   async function fetchIP() {
-    if (!ipV4El && !ipV6El) return;
+    if (!ipV4El && !ipV6El && !ipPublicEl) return;
     try {
-      const res = await fetch('/network/private-ip');
-      if (!res.ok) throw new Error('no response');
-      const data = await res.json();
-      const ipv4 = Array.isArray(data?.ipv4) ? data.ipv4 : [];
-      const ipv6 = Array.isArray(data?.ipv6) ? data.ipv6 : [];
+      const privateReq = fetch('/network/private-ip').then((r) => r.ok ? r.json() : null).catch(() => null);
+      const pubV4Req = fetch('https://api.ipify.org?format=json').then((r) => r.ok ? r.json() : null).catch(() => null);
+      const [privateData, pub4] = await Promise.all([privateReq, pubV4Req]);
+
+      const ipv4 = Array.isArray(privateData?.ipv4) ? privateData.ipv4 : [];
       if (ipV4El) ipV4El.textContent = ipv4.length ? ipv4.join(' · ') : 'no disponible';
-      if (ipV6El) ipV6El.textContent = ipv6.length ? ipv6.join(' · ') : 'no disponible';
+      if (ipV6El) ipV6El.textContent = '';
+
+      if (ipPublicEl) {
+        const onlyV4 = String(pub4?.ip || '').trim();
+        ipPublicEl.textContent = onlyV4 || 'no disponible';
+      }
     } catch (err) {
       console.error('fetchIP error', err);
       if (ipV4El) ipV4El.textContent = 'no disponible';
-      if (ipV6El) ipV6El.textContent = 'no disponible';
+      if (ipV6El) ipV6El.textContent = '';
+      if (ipPublicEl) ipPublicEl.textContent = 'no disponible';
     }
   }
   async function fetchUsdRates() {
@@ -485,6 +1870,16 @@ document.addEventListener('DOMContentLoaded', () => {
   setInterval(() => { try { refreshLiveStartCountdowns(); } catch {} }, 1000);
   setInterval(fetchUsdRates, 10 * 60 * 1000);
   setupKeyboardForButtons();
+  setUiTheme(getUiTheme());
+  sanitizeActivityCacheForCurrentUser();
+  renderAuthState();
+  authOpenBtn?.addEventListener('click', openAuthModal);
+  authLogoutBtn?.addEventListener('click', logoutFlow);
+  appMenuBtn?.addEventListener('click', openAppMenu);
+  activityBellBtn?.addEventListener('click', openBellNotifications);
+  activityRefreshBtn?.addEventListener('click', () => fetchActivityLogs(false));
+  activityLimitSel?.addEventListener('change', () => fetchActivityLogs(false));
+  setInterval(() => { try { if (isAdminUser()) fetchActivityLogs(false); } catch {} }, 30000);
   fxAmountInput?.addEventListener('input', renderFxConverter);
   fxBaseCurrency?.addEventListener('change', renderFxConverter);
 
@@ -566,13 +1961,10 @@ document.addEventListener('DOMContentLoaded', () => {
     if (!overlay) {
       overlay = document.createElement('div');
       overlay.id = 'message-overlay';
-      overlay.style.position = 'fixed'; overlay.style.inset = '0';
-      overlay.style.background = 'rgba(15,23,42,0.75)'; overlay.style.backdropFilter = 'blur(4px)';
-      overlay.style.display = 'flex'; overlay.style.alignItems = 'center'; overlay.style.justifyContent = 'center';
-      overlay.style.zIndex = '10002'; overlay.style.visibility = 'hidden'; overlay.style.opacity = '0';
-      overlay.style.transition = 'opacity 0.15s ease-out, visibility 0.15s ease-out';
+      styleModalOverlay(overlay, '10002', 'flex');
+      overlay.style.visibility = 'hidden'; overlay.style.opacity = '0';
       overlay.innerHTML = `
-        <div role="alertdialog" aria-modal="true" aria-labelledby="msg-title" style="background:#020617;border:1px solid #1f2937;border-radius:12px;max-width:360px;width:92%;padding:16px;box-shadow:0 20px 60px rgba(0,0,0,0.7);">
+        <div role="alertdialog" aria-modal="true" aria-labelledby="msg-title" style="padding:16px;">
           <div id="msg-title" style="font-weight:600;margin-bottom:8px;color:#e5e7eb;">Mensaje</div>
           <div id="msg-body" style="margin-bottom:12px;color:#cbd5e1;"></div>
           <div style="display:flex;justify-content:flex-end;">
@@ -580,6 +1972,7 @@ document.addEventListener('DOMContentLoaded', () => {
           </div>
         </div>`;
       document.body.appendChild(overlay);
+      styleModalPanel(overlay.firstElementChild, '360px');
     }
     return overlay;
   }
@@ -651,15 +2044,141 @@ document.addEventListener('DOMContentLoaded', () => {
   }
 
   // Modal de formulario (crear/editar)
+  const FORM_EMOJIS = ['😀','🔥','✅','⚠️','🚀','💡','🧠','💰','📌','📝','🎯','⏰','📎','💳','🏦','🔧','🐞','📚'];
+  const FORM_EMOJIS_EXTRA = ['😁','😂','🤣','😅','😊','😉','😍','🤩','😎','🥳','😴','🤯','🥶','😡','🙏','👏','👀','🫡','💪','❤️','🧡','💛','💚','💙','💜','🖤','🤍','🤎','⭐','🌟','⚡','🌈','🌍','🌙','☀️','☕','🍀','🌱','🍎','🍕','🎵','🎮','📷','💻','⌚','📱','📢','📦','🔒','🔓','🔑','🧪','📈','📉','🧾','🗂️','📂','🧩','🧭','🛰️','🚧','✅','❌','➕','➖','↗️','↘️','🔔','🗑️','✏️'];
+  function fieldSupportsEmoji(field){
+    const s = `${field?.id || ''} ${field?.label || ''}`.toLowerCase();
+    return /(title|titulo|description|descripcion|tag|tags|content|contenido|message|mensaje|note|nota)/.test(s);
+  }
+  function closeAllEmojiPanels(exceptPanel = null){
+    document.querySelectorAll('.form-emoji-panel').forEach((p) => {
+      if (exceptPanel && p === exceptPanel) return;
+      p.style.opacity = '0';
+      p.style.transform = 'translateY(-4px) scale(.98)';
+      p.dataset.open = '0';
+      setTimeout(() => {
+        if (p.dataset.open === '1') return;
+        p.style.display = 'none';
+      }, 180);
+    });
+  }
+  function addEmojiPickerToField(row, input){
+    if (!row || !input) return;
+    const wrap = document.createElement('div');
+    wrap.style.display = 'flex';
+    wrap.style.alignItems = 'center';
+    wrap.style.gap = '8px';
+    wrap.style.marginTop = '6px';
+    const panel = document.createElement('div');
+    panel.className = 'form-emoji-panel';
+    panel.style.display = 'none';
+    panel.style.opacity = '0';
+    panel.style.transform = 'translateY(-4px) scale(.98)';
+    panel.style.transition = 'opacity .18s ease, transform .18s ease';
+    panel.style.flexWrap = 'wrap';
+    panel.style.gap = '6px';
+    panel.style.padding = '8px';
+    panel.style.border = '1px solid #1f2937';
+    panel.style.borderRadius = '10px';
+    panel.style.background = '#020617';
+    panel.style.marginTop = '8px';
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.className = 'form-emoji-toggle';
+    btn.className = 'btn btn-neutral';
+    btn.textContent = '😀 Emoji';
+    btn.style.fontSize = '12px';
+    btn.style.padding = '6px 10px';
+    btn.addEventListener('click', (e) => {
+      e.preventDefault();
+      const willOpen = panel.style.display === 'none';
+      closeAllEmojiPanels(willOpen ? panel : null);
+      if (!willOpen) {
+        panel.style.opacity = '0';
+        panel.style.transform = 'translateY(-4px) scale(.98)';
+        panel.dataset.open = '0';
+        setTimeout(() => {
+          if (panel.dataset.open === '1') return;
+          panel.style.display = 'none';
+        }, 180);
+        return;
+      }
+      panel.style.display = 'flex';
+      panel.dataset.open = '1';
+      requestAnimationFrame(() => {
+        panel.style.opacity = '1';
+        panel.style.transform = 'translateY(0) scale(1)';
+      });
+    });
+    FORM_EMOJIS.forEach((em) => {
+      const ebtn = document.createElement('button');
+      ebtn.type = 'button';
+      ebtn.textContent = em;
+      ebtn.style.background = '#0b1220';
+      ebtn.style.border = '1px solid #334155';
+      ebtn.style.borderRadius = '8px';
+      ebtn.style.padding = '5px 8px';
+      ebtn.style.cursor = 'pointer';
+      ebtn.addEventListener('click', () => {
+        const start = Number(input.selectionStart ?? input.value.length);
+        const end = Number(input.selectionEnd ?? input.value.length);
+        const v = String(input.value || '');
+        input.value = `${v.slice(0, start)}${em}${v.slice(end)}`;
+        input.focus();
+        const pos = start + em.length;
+        try { input.setSelectionRange(pos, pos); } catch {}
+      });
+      panel.appendChild(ebtn);
+    });
+    let expanded = false;
+    const addEmojiBtn = (em) => {
+      const ebtn = document.createElement('button');
+      ebtn.type = 'button';
+      ebtn.textContent = em;
+      ebtn.style.background = '#0b1220';
+      ebtn.style.border = '1px solid #334155';
+      ebtn.style.borderRadius = '8px';
+      ebtn.style.padding = '5px 8px';
+      ebtn.style.cursor = 'pointer';
+      ebtn.addEventListener('click', () => {
+        const start = Number(input.selectionStart ?? input.value.length);
+        const end = Number(input.selectionEnd ?? input.value.length);
+        const v = String(input.value || '');
+        input.value = `${v.slice(0, start)}${em}${v.slice(end)}`;
+        input.focus();
+        const pos = start + em.length;
+        try { input.setSelectionRange(pos, pos); } catch {}
+      });
+      panel.appendChild(ebtn);
+    };
+    const moreBtn = document.createElement('button');
+    moreBtn.type = 'button';
+    moreBtn.className = 'btn btn-neutral';
+    moreBtn.textContent = 'Más...';
+    moreBtn.style.fontSize = '11px';
+    moreBtn.style.padding = '4px 8px';
+    moreBtn.addEventListener('click', (e) => {
+      e.preventDefault();
+      if (expanded) return;
+      expanded = true;
+      FORM_EMOJIS_EXTRA.forEach((em) => addEmojiBtn(em));
+      moreBtn.disabled = true;
+      moreBtn.textContent = 'Más emojis cargados';
+      moreBtn.style.opacity = '.7';
+    });
+    panel.appendChild(moreBtn);
+    wrap.appendChild(btn);
+    row.appendChild(wrap);
+    row.appendChild(panel);
+  }
   function ensureFormModal() {
     let overlay = document.getElementById('form-overlay');
     if (!overlay) {
       overlay = document.createElement('div'); overlay.id = 'form-overlay';
-      overlay.style.position='fixed'; overlay.style.inset='0'; overlay.style.background='rgba(15,23,42,0.75)'; overlay.style.backdropFilter='blur(4px)';
-      overlay.style.display='flex'; overlay.style.alignItems='center'; overlay.style.justifyContent='center'; overlay.style.zIndex='10003';
-      overlay.style.visibility='hidden'; overlay.style.opacity='0'; overlay.style.transition='opacity 0.15s ease-out, visibility 0.15s ease-out';
+      styleModalOverlay(overlay, '10003', 'flex');
+      overlay.style.visibility='hidden'; overlay.style.opacity='0';
       overlay.innerHTML = `
-        <div class="form-modal" role="dialog" aria-modal="true" aria-labelledby="form-title" style="background:radial-gradient(circle at top, rgba(14,116,144,0.18), rgba(2,6,23,0.96) 48%), #020617;border:1px solid #164e63;border-radius:14px;max-width:520px;width:92%;padding:16px;box-shadow:0 20px 60px rgba(0,0,0,0.7), 0 0 0 1px rgba(56,189,248,0.18) inset;max-height:90vh;overflow:auto;">
+        <div class="form-modal" role="dialog" aria-modal="true" aria-labelledby="form-title" style="padding:16px; max-height:90vh; overflow:auto;">
           <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;">
             <div id="form-title" style="font-weight:700;color:#f8fafc;">Formulario</div>
             <button id="form-close" class="btn btn-neutral" style="font-size:14px;padding:4px 8px;">×</button>
@@ -671,6 +2190,15 @@ document.addEventListener('DOMContentLoaded', () => {
           </div>
         </div>`;
       document.body.appendChild(overlay);
+      styleModalPanel(overlay.firstElementChild, '760px');
+      const panel = overlay.firstElementChild;
+      if (panel) {
+        panel.style.fontSize = '16px';
+        panel.style.maxHeight = 'calc(100vh - 40px)';
+        panel.style.overflowY = 'auto';
+        panel.style.overscrollBehavior = 'contain';
+        panel.style.webkitOverflowScrolling = 'touch';
+      }
     }
     return overlay;
   }
@@ -683,7 +2211,7 @@ document.addEventListener('DOMContentLoaded', () => {
       fields.forEach(f => {
         const row = document.createElement('div');
         row.style.display = 'flex'; row.style.flexDirection='column'; row.style.marginBottom='12px';
-        const label=document.createElement('label'); label.textContent=f.label; label.style.display='block'; label.style.color='#e5e7eb'; label.style.fontWeight='600'; label.style.marginBottom='6px';
+        const label=document.createElement('label'); label.textContent=f.label; label.style.display='block'; label.style.color='#e5e7eb'; label.style.fontWeight='600'; label.style.fontSize='16px'; label.style.marginBottom='6px';
         row.appendChild(label);
         let input;
         if (f.type==='textarea'){
@@ -692,19 +2220,18 @@ document.addEventListener('DOMContentLoaded', () => {
           input=document.createElement('input'); input.type='file'; if (f.accept) input.accept=f.accept; if (f.multiple) input.multiple=true;
         } else if (f.type==='datetime-local'){
           const wrap = document.createElement('div');
-          wrap.style.display='flex'; wrap.style.alignItems='center'; wrap.style.gap='8px';
-          wrap.style.background='linear-gradient(135deg, rgba(14,116,144,0.22), rgba(30,64,175,0.16) 45%, rgba(11,18,32,0.98) 100%)';
-          wrap.style.border='1px solid #0ea5e9'; wrap.style.borderRadius='12px'; wrap.style.padding='8px'; wrap.style.boxShadow='0 8px 22px rgba(2,132,199,0.25), 0 0 0 1px rgba(125,211,252,0.25) inset';
-          input=document.createElement('input'); input.type='text'; input.id=f.id; input.value=f.value||''; input.placeholder='YYYY-MM-DDTHH:mm';
-          input.style.flex='1'; input.style.background='rgba(2,6,23,0.55)'; input.style.color='#f0f9ff'; input.style.border='none'; input.style.outline='none'; input.style.padding='10px 12px'; input.style.borderRadius='9px'; input.style.fontWeight='700';
-          const btn=document.createElement('button'); btn.type='button'; btn.textContent='📅'; btn.title='Abrir calendario'; btn.style.background='linear-gradient(135deg,#06b6d4,#3b82f6)'; btn.style.color='#fff'; btn.style.border='1px solid rgba(186,230,253,0.55)'; btn.style.borderRadius='10px'; btn.style.padding='9px 11px'; btn.style.cursor='pointer'; btn.style.boxShadow='0 8px 16px rgba(37,99,235,0.35)';
+          wrap.style.display='flex'; wrap.style.alignItems='flex-end'; wrap.style.gap='8px';
+          wrap.style.borderBottom=LOGIN_INPUT_BORDER; wrap.style.padding='0 0 6px 0';
+          input=document.createElement('input'); input.type='text'; input.id=f.id; input.value=(f.value || '').replace('T', ' '); input.placeholder='YYYY-MM-DD HH:mm';
+          input.style.flex='1'; input.style.fontWeight='700'; input.style.fontSize='16px';
+          const btn=document.createElement('button'); btn.type='button'; btn.textContent='📅'; btn.title='Abrir calendario'; btn.style.background='rgba(15,23,42,.28)'; btn.style.color='#fff'; btn.style.border='1px solid rgba(226,232,240,.75)'; btn.style.borderRadius='6px'; btn.style.padding='6px 10px'; btn.style.cursor='pointer';
           const taskCountMap = getTaskCountByDayMap();
           const fp = attachFlatpickrIfAvailable(input, {
             enableTime: true,
             time_24hr: true,
             minuteIncrement: 5,
             allowInput: true,
-            dateFormat: 'Y-m-d\\TH:i',
+            dateFormat: 'Y-m-d H:i',
             defaultDate: f.value || undefined,
             onDayCreate: (_dObj, _dStr, _fp, dayElem) => {
               const key = localDateKey(dayElem.dateObj);
@@ -713,45 +2240,177 @@ document.addEventListener('DOMContentLoaded', () => {
             },
           });
           btn.addEventListener('click', ()=>{ if (fp && typeof fp.open === 'function') fp.open(); else input.focus(); });
-          input.addEventListener('focus', ()=>{ wrap.style.transform='translateY(-1px)'; wrap.style.boxShadow='0 10px 24px rgba(2,132,199,0.35), 0 0 0 1px rgba(125,211,252,0.35) inset'; });
-          input.addEventListener('blur', ()=>{ wrap.style.transform='none'; wrap.style.boxShadow='0 8px 22px rgba(2,132,199,0.25), 0 0 0 1px rgba(125,211,252,0.25) inset'; });
+          input.addEventListener('focus', ()=>{ wrap.style.borderBottomColor='#ffffff'; });
+          input.addEventListener('blur', ()=>{ wrap.style.borderBottomColor='rgba(226,232,240,.65)'; });
           wrap.appendChild(input); wrap.appendChild(btn); row.appendChild(wrap);
+          const helper = document.createElement('small');
+          helper.style.display = 'block';
+          helper.style.marginTop = '6px';
+          helper.style.color = '#94a3b8';
+          row.appendChild(helper);
+          bindDateMask(input, 'datetime', helper);
         } else if (f.type==='month'){
           const wrap = document.createElement('div');
-          wrap.style.display='flex'; wrap.style.alignItems='center'; wrap.style.gap='8px';
-          wrap.style.background='linear-gradient(135deg, rgba(14,116,144,0.22), rgba(30,64,175,0.16) 45%, rgba(11,18,32,0.98) 100%)';
-          wrap.style.border='1px solid #0ea5e9'; wrap.style.borderRadius='12px'; wrap.style.padding='8px'; wrap.style.boxShadow='0 8px 22px rgba(2,132,199,0.25), 0 0 0 1px rgba(125,211,252,0.25) inset';
+          wrap.style.display='flex'; wrap.style.alignItems='flex-end'; wrap.style.gap='8px';
+          wrap.style.borderBottom=LOGIN_INPUT_BORDER; wrap.style.padding='0 0 6px 0';
           input=document.createElement('input'); input.type='text'; input.id=f.id; input.value=f.value||''; input.placeholder='YYYY-MM';
-          input.style.flex='1'; input.style.background='rgba(2,6,23,0.55)'; input.style.color='#f0f9ff'; input.style.border='none'; input.style.outline='none'; input.style.padding='10px 12px'; input.style.borderRadius='9px'; input.style.fontWeight='700';
-          const btn=document.createElement('button'); btn.type='button'; btn.textContent='📅'; btn.title='Abrir calendario'; btn.style.background='linear-gradient(135deg,#06b6d4,#3b82f6)'; btn.style.color='#fff'; btn.style.border='1px solid rgba(186,230,253,0.55)'; btn.style.borderRadius='10px'; btn.style.padding='9px 11px'; btn.style.cursor='pointer'; btn.style.boxShadow='0 8px 16px rgba(37,99,235,0.35)';
+          input.style.flex='1'; input.style.fontWeight='700'; input.style.fontSize='16px';
+          const btn=document.createElement('button'); btn.type='button'; btn.textContent='📅'; btn.title='Abrir calendario'; btn.style.background='rgba(15,23,42,.28)'; btn.style.color='#fff'; btn.style.border='1px solid rgba(226,232,240,.75)'; btn.style.borderRadius='6px'; btn.style.padding='6px 10px'; btn.style.cursor='pointer';
           const monthPlugin = monthPluginConfig();
           const fp = attachFlatpickrIfAvailable(input, monthPlugin ? { plugins: [monthPlugin], defaultDate: f.value || undefined } : { dateFormat: 'Y-m', defaultDate: f.value || undefined });
           btn.addEventListener('click', ()=>{ if (fp && typeof fp.open === 'function') fp.open(); else input.focus(); });
-          input.addEventListener('focus', ()=>{ wrap.style.transform='translateY(-1px)'; wrap.style.boxShadow='0 10px 24px rgba(2,132,199,0.35), 0 0 0 1px rgba(125,211,252,0.35) inset'; });
-          input.addEventListener('blur', ()=>{ wrap.style.transform='none'; wrap.style.boxShadow='0 8px 22px rgba(2,132,199,0.25), 0 0 0 1px rgba(125,211,252,0.25) inset'; });
+          input.addEventListener('focus', ()=>{ wrap.style.borderBottomColor='#ffffff'; });
+          input.addEventListener('blur', ()=>{ wrap.style.borderBottomColor='rgba(226,232,240,.65)'; });
           wrap.appendChild(input); wrap.appendChild(btn); row.appendChild(wrap);
+          const helper = document.createElement('small');
+          helper.style.display = 'block';
+          helper.style.marginTop = '6px';
+          helper.style.color = '#94a3b8';
+          row.appendChild(helper);
+          bindDateMask(input, 'month', helper);
         } else if (f.type==='select'){
-          input=document.createElement('select');
-          (f.options||[]).forEach(opt=>{ const o=document.createElement('option'); o.value=opt.value; o.textContent=opt.label; if (opt.value===f.value) o.selected=true; input.appendChild(o); });
+          if (f.id === 'bank' && Array.isArray(f.options) && f.options.length) {
+            const hidden = document.createElement('input');
+            hidden.type = 'hidden';
+            hidden.id = f.id;
+            hidden.value = f.value || f.options[0].value;
+            input = hidden;
+            const wrapper = document.createElement('details');
+            wrapper.style.border = '1px solid rgba(125,211,252,.38)';
+            wrapper.style.borderRadius = '10px';
+            wrapper.style.padding = '8px';
+            wrapper.style.background = 'rgba(2,6,23,.28)';
+            const summary = document.createElement('summary');
+            summary.style.cursor = 'pointer';
+            summary.style.listStyle = 'none';
+            summary.style.display = 'flex';
+            summary.style.alignItems = 'center';
+            summary.style.gap = '8px';
+            summary.style.color = '#e2e8f0';
+            summary.style.fontWeight = '700';
+            const selectedInfo = document.createElement('span');
+            selectedInfo.style.display = 'inline-flex';
+            selectedInfo.style.alignItems = 'center';
+            selectedInfo.style.gap = '8px';
+            const list = document.createElement('div');
+            list.style.display = 'grid';
+            list.style.gap = '6px';
+            list.style.marginTop = '8px';
+            const paintSelected = () => {
+              const cur = (f.options || []).find((x) => String(x.value) === String(hidden.value)) || f.options[0];
+              const icon = BANK_ICON?.[String(cur?.value || '')] || '';
+              selectedInfo.innerHTML = `${icon ? `<img src="${escapeHtml(icon)}" alt="" style="width:18px; height:18px; object-fit:contain; border-radius:4px; border:1px solid rgba(125,211,252,.35);" />` : ''}<span>${escapeHtml(cur?.label || cur?.value || '')}</span>`;
+            };
+            (f.options || []).forEach((opt) => {
+              const btnOpt = document.createElement('button');
+              btnOpt.type = 'button';
+              btnOpt.className = 'btn btn-neutral';
+              btnOpt.style.justifyContent = 'flex-start';
+              btnOpt.style.textAlign = 'left';
+              btnOpt.style.padding = '6px 8px';
+              btnOpt.style.display = 'inline-flex';
+              btnOpt.style.alignItems = 'center';
+              btnOpt.style.gap = '8px';
+              const icon = BANK_ICON?.[String(opt.value || '')] || '';
+              btnOpt.innerHTML = `${icon ? `<img src="${escapeHtml(icon)}" alt="" style="width:18px; height:18px; object-fit:contain; border-radius:4px; border:1px solid rgba(125,211,252,.35);" />` : ''}<span>${escapeHtml(opt.label || opt.value)}</span>`;
+              btnOpt.addEventListener('click', () => {
+                hidden.value = String(opt.value || '');
+                paintSelected();
+                wrapper.removeAttribute('open');
+              });
+              list.appendChild(btnOpt);
+            });
+            summary.appendChild(selectedInfo);
+            wrapper.appendChild(summary);
+            wrapper.appendChild(list);
+            paintSelected();
+            row.appendChild(wrapper);
+          } else {
+            input=document.createElement('select');
+            (f.options||[]).forEach(opt=>{ const o=document.createElement('option'); o.value=opt.value; o.textContent=opt.label; if (opt.value===f.value) o.selected=true; input.appendChild(o); });
+          }
         } else {
           input=document.createElement('input'); input.type=f.type||'text';
         }
         if (input && f.type!=='datetime-local' && f.type!=='month') {
           input.id=f.id; if (f.type!=='file') input.value=f.value||'';
-          // Unificar tamaño: ancho completo y mismo padding
-          input.style.width='100%'; input.style.boxSizing='border-box'; input.style.background='#0b1220'; input.style.color='#e5e7eb'; input.style.border='1px solid #334155'; input.style.borderRadius='10px'; input.style.padding='8px 10px';
+          // Estilo tipo login para todos los inputs del modal
+          if (f.type === 'file') {
+            input.style.width='100%'; input.style.boxSizing='border-box'; input.style.background='transparent'; input.style.color='#e5e7eb'; input.style.border=LOGIN_INPUT_BORDER; input.style.borderRadius='8px'; input.style.padding='8px';
+          } else {
+            applyLoginInputStyle(input);
+          }
           row.appendChild(input);
+          const descLike = /description|descripcion/i.test(String(f.id || '') + ' ' + String(f.label || ''));
+          if (descLike) {
+            const max = Number(FIELD_TEXT_LIMITS[f.id] || input.maxLength || 0) || 0;
+            const counter = document.createElement('small');
+            counter.style.display = 'block';
+            counter.style.marginTop = '4px';
+            counter.style.textAlign = 'right';
+            counter.style.color = '#93c5fd';
+            const updateCounter = () => {
+              const len = String(input.value || '').length;
+              counter.textContent = max ? `${len}/${max}` : `${len} caracteres`;
+            };
+            updateCounter();
+            input.addEventListener('input', updateCounter);
+            row.appendChild(counter);
+          }
+          if ((f.type === 'text' || f.type === 'textarea') && fieldSupportsEmoji(f)) addEmojiPickerToField(row, input);
         }
         bodyEl.appendChild(row);
       });
       enforceInputLimits(bodyEl);
+      applyLoginStyleToInputs(bodyEl);
     }
-    function cleanup(){ overlay.style.opacity='0'; overlay.style.visibility='hidden'; btnCancel.removeEventListener('click', onCancel); btnSubmit.removeEventListener('click', onSubmitClick); btnClose.removeEventListener('click', onCancel); overlay.removeEventListener('click', onOverlayClick); document.removeEventListener('keydown', onKey); }
+    const collectValues = () => {
+      const values = {};
+      fields.forEach((f) => {
+        const el = overlay.querySelector('#' + f.id);
+        if (!el) return;
+        if (f.type === 'file') values[f.id] = '';
+        else {
+          let v = (el.value || '').trim();
+          if (f.type === 'datetime-local') v = v.replace(' ', 'T');
+          values[f.id] = v;
+        }
+      });
+      return values;
+    };
+    const initialSnapshot = JSON.stringify(collectValues());
+    const isDirty = () => JSON.stringify(collectValues()) !== initialSnapshot;
+    function cleanup(){ closeAllEmojiPanels(); overlay.style.opacity='0'; overlay.style.visibility='hidden'; btnCancel.removeEventListener('click', onCancel); btnSubmit.removeEventListener('click', onSubmitClick); btnClose.removeEventListener('click', onCancel); overlay.removeEventListener('click', onOverlayClick); document.removeEventListener('keydown', onKey); document.removeEventListener('mousedown', onGlobalMouseDown, true); }
     function onCancel(e){ e.preventDefault(); cleanup(); }
-    function onOverlayClick(e){ if (e.target===overlay) onCancel(e); }
-    function onKey(e){ if (e.key==='Escape') onCancel(e); }
-    async function onSubmitClick(e){ e.preventDefault(); const values={}; fields.forEach(f=>{ const el=overlay.querySelector('#'+f.id); if (!el) return; if (f.type==='file'){ values[f.id]=el.files; } else { values[f.id]=(el.value||'').trim(); } }); cleanup(); try { await onSubmit(values); } catch (err) { console.error('form submit error', err); await showMessageModal('No se pudo enviar el formulario', { title: 'Error' }); } }
+    async function onOverlayClick(e){
+      if (e.target !== overlay) return;
+      e.preventDefault();
+      if (!isDirty()) { cleanup(); return; }
+      const decision = await showUnsavedChangesPrompt();
+      if (decision === 'save') await onSubmitClick(e);
+      else if (decision === 'discard') cleanup();
+    }
+    async function onKey(e){
+      if (e.key !== 'Escape') return;
+      e.preventDefault();
+      if (!isDirty()) { cleanup(); return; }
+      const decision = await showUnsavedChangesPrompt();
+      if (decision === 'save') await onSubmitClick(e);
+      else if (decision === 'discard') cleanup();
+    }
+    async function onSubmitClick(e){ e.preventDefault(); const values={}; fields.forEach(f=>{ const el=overlay.querySelector('#'+f.id); if (!el) return; if (f.type==='file'){ values[f.id]=el.files; } else { let v=(el.value||'').trim(); if (f.type==='datetime-local') v = v.replace(' ', 'T'); values[f.id]=v; } }); cleanup(); try { await onSubmit(values); } catch (err) { console.error('form submit error', err); await showMessageModal('No se pudo enviar el formulario', { title: 'Error' }); } }
+    function onGlobalMouseDown(e){
+      const t = e.target;
+      if (!(t instanceof Element)) return;
+      const insidePanel = t.closest('.form-emoji-panel');
+      const insideToggle = t.closest('.form-emoji-toggle');
+      const insideInput = t.closest('#form-body input, #form-body textarea, #form-body select');
+      if (insidePanel || insideToggle) return;
+      if (insideInput) { closeAllEmojiPanels(); return; }
+      closeAllEmojiPanels();
+    }
     btnCancel.addEventListener('click', onCancel); btnSubmit.addEventListener('click', onSubmitClick); btnClose.addEventListener('click', onCancel); overlay.addEventListener('click', onOverlayClick); document.addEventListener('keydown', onKey);
+    document.addEventListener('mousedown', onGlobalMouseDown, true);
     overlay.style.visibility='visible'; overlay.style.opacity='1'; setTimeout(()=>{ try { btnSubmit.focus(); } catch {} },0);
   }
 
@@ -760,18 +2419,22 @@ document.addEventListener('DOMContentLoaded', () => {
     document.querySelectorAll('input[type="date"]').forEach((el) => {
       if (el.dataset.fpBound) return;
       el.type = 'text';
+      bindDateMask(el, 'date');
       attachFlatpickrIfAvailable(el, { dateFormat: 'Y-m-d', defaultDate: el.value || undefined });
       el.dataset.fpBound = '1';
     });
     document.querySelectorAll('input[type="datetime-local"]').forEach((el) => {
       if (el.dataset.fpBound) return;
       el.type = 'text';
-      attachFlatpickrIfAvailable(el, { enableTime: true, time_24hr: true, minuteIncrement: 5, dateFormat: 'Y-m-d\\TH:i', defaultDate: el.value || undefined });
+      if ((el.value || '').includes('T')) el.value = String(el.value).replace('T', ' ');
+      bindDateMask(el, 'datetime');
+      attachFlatpickrIfAvailable(el, { enableTime: true, time_24hr: true, minuteIncrement: 5, dateFormat: 'Y-m-d H:i', defaultDate: el.value || undefined });
       el.dataset.fpBound = '1';
     });
     document.querySelectorAll('input[type="month"]').forEach((el) => {
       if (el.dataset.fpBound) return;
       el.type = 'text';
+      bindDateMask(el, 'month');
       if (monthPlugin) attachFlatpickrIfAvailable(el, { plugins: [monthPlugin], defaultDate: el.value || undefined });
       else attachFlatpickrIfAvailable(el, { dateFormat: 'Y-m', defaultDate: el.value || undefined });
       el.dataset.fpBound = '1';
@@ -792,6 +2455,8 @@ document.addEventListener('DOMContentLoaded', () => {
     if (!errors || errors.length === 0) { targetEl.innerHTML = '<li>No hay errores</li>'; return; }
     errors.forEach(e => {
       const li = document.createElement('li');
+      li.setAttribute('data-entity', 'errors');
+      li.setAttribute('data-id', String(e.id));
       const viewDiv = document.createElement('div');
       // envolver textos con clases para Modo P
       const tagsHtml = Array.isArray(e.tags) ? e.tags.map(t => escapeHtml(t)).join(', ') : '';
@@ -814,7 +2479,9 @@ document.addEventListener('DOMContentLoaded', () => {
       const btnUpdate=document.createElement('button'); btnUpdate.textContent='Actualizar'; applyBtn(btnUpdate, 'primary');
       const btnDelete=document.createElement('button'); btnDelete.textContent='Eliminar'; btnDelete.className='btn btn-danger';
       btnUpdate.addEventListener('click',()=>openEditModal(e));
-      btnDelete.addEventListener('click', async ()=>{ const confirmed = await showConfirm('¿Eliminar este error?'); if (!confirmed) return; try { const res = await fetch('/errors/'+e.id,{method:'DELETE'}); if (!res.ok) throw new Error(await res.text()||'Error eliminando'); await refreshErrorsEverywhere(); } catch (err) { console.error(err); await showMessageModal('No se pudo eliminar el error', { title: 'Error' }); } });
+      if (!blockAdminAction(btnDelete, 'Eliminar errores requiere rol ADMIN')) {
+        btnDelete.addEventListener('click', async ()=>{ const confirmed = await showConfirm('¿Eliminar este error?'); if (!confirmed) return; try { const res = await fetch('/errors/'+e.id,{method:'DELETE', headers:{'x-entity-name': toHeaderSafe(e?.title)}}); if (!res.ok) throw new Error(await res.text()||'Error eliminando'); await refreshErrorsEverywhere(); } catch (err) { console.error(err); await showMessageModal('No se pudo eliminar el error', { title: 'Error' }); } });
+      }
       li.appendChild(viewDiv); li.appendChild(btnUpdate); if (btnToggle) li.appendChild(btnToggle); li.appendChild(btnDelete); if (thumbs) li.appendChild(thumbs);
       targetEl.appendChild(li);
     });
@@ -826,9 +2493,11 @@ document.addEventListener('DOMContentLoaded', () => {
   function ensureConfirmModal() {
     let overlay = document.getElementById('confirm-overlay');
     if (!overlay) {
-      overlay = document.createElement('div'); overlay.id='confirm-overlay'; overlay.style.position='fixed'; overlay.style.inset='0'; overlay.style.background='rgba(15,23,42,0.75)'; overlay.style.backdropFilter='blur(4px)'; overlay.style.display='flex'; overlay.style.alignItems='center'; overlay.style.justifyContent='center'; overlay.style.zIndex='10000'; overlay.style.visibility='hidden'; overlay.style.opacity='0'; overlay.style.transition='opacity 0.15s ease-out, visibility 0.15s ease-out';
+      overlay = document.createElement('div'); overlay.id='confirm-overlay';
+      styleModalOverlay(overlay, '10000', 'flex');
+      overlay.style.visibility='hidden'; overlay.style.opacity='0';
       overlay.innerHTML = `
-        <div role="dialog" aria-modal="true" aria-labelledby="confirm-title" style="background:#020617;border:1px solid #1f2937;border-radius:12px;max-width:360px;width:92%;padding:16px;box-shadow:0 20px 60px rgba(0,0,0,0.7);">
+        <div role="dialog" aria-modal="true" aria-labelledby="confirm-title" style="padding:16px;">
           <div id="confirm-title" style="font-weight:600;margin-bottom:8px;color:#e5e7eb;">Confirmar</div>
           <div style="margin-bottom:12px;color:#cbd5e1;"><span id="confirm-message">¿Seguro?</span></div>
           <div style="display:flex;justify-content:flex-end;gap:8px;">
@@ -836,6 +2505,7 @@ document.addEventListener('DOMContentLoaded', () => {
             <button id="confirm-accept" class="btn btn-danger">Aceptar</button>
           </div>`;
       document.body.appendChild(overlay);
+      styleModalPanel(overlay.firstElementChild, '360px');
     }
     return overlay;
   }
@@ -845,11 +2515,70 @@ document.addEventListener('DOMContentLoaded', () => {
     if (titleEl) titleEl.textContent=title; if (msgEl) msgEl.textContent=message; if (btnOk) btnOk.textContent=confirmText; if (btnCancel) btnCancel.textContent=cancelText;
     return new Promise(resolve=>{ function cleanup(){ overlay.style.opacity='0'; overlay.style.visibility='hidden'; btnOk.removeEventListener('click', onOk); btnCancel.removeEventListener('click', onCancel); overlay.removeEventListener('click', onOverlayClick); document.removeEventListener('keydown', onKey);} function onOk(e){ e.preventDefault(); cleanup(); resolve(true);} function onCancel(e){ e.preventDefault(); cleanup(); resolve(false);} function onOverlayClick(e){ if (e.target===overlay) onCancel(e);} function onKey(e){ if (e.key==='Escape') onCancel(e);} btnOk.addEventListener('click', onOk); btnCancel.addEventListener('click', onCancel); overlay.addEventListener('click', onOverlayClick); document.addEventListener('keydown', onKey); overlay.style.visibility='visible'; overlay.style.opacity='1'; setTimeout(()=>{ try { btnCancel.focus(); } catch {} },0); });
   }
+  function ensureUnsavedChangesModal() {
+    let overlay = document.getElementById('unsaved-overlay');
+    if (!overlay) {
+      overlay = document.createElement('div');
+      overlay.id = 'unsaved-overlay';
+      styleModalOverlay(overlay, '11050', 'flex');
+      overlay.style.background = 'rgba(2,6,23,0.78)';
+      overlay.style.visibility = 'hidden';
+      overlay.style.opacity = '0';
+      overlay.innerHTML = `
+        <div role="dialog" aria-modal="true" aria-labelledby="unsaved-title" style="padding:16px;">
+          <div id="unsaved-title" style="font-weight:700;margin-bottom:8px;color:#e5e7eb;">Cambios sin guardar</div>
+          <div id="unsaved-message" style="margin-bottom:12px;color:#cbd5e1;">Hiciste cambios en el formulario. ¿Qué deseas hacer?</div>
+          <div style="display:flex;justify-content:flex-end;gap:8px;flex-wrap:wrap;">
+            <button id="unsaved-continue" class="btn btn-neutral" type="button">Seguir editando</button>
+            <button id="unsaved-discard" class="btn btn-danger" type="button">Descartar</button>
+            <button id="unsaved-save" class="btn btn-success" type="button">Guardar</button>
+          </div>
+        </div>`;
+      document.body.appendChild(overlay);
+      styleModalPanel(overlay.firstElementChild, '420px');
+      const panel = overlay.firstElementChild;
+      if (panel) {
+        panel.style.position = 'relative';
+        panel.style.zIndex = '1';
+      }
+    }
+    return overlay;
+  }
+  function showUnsavedChangesPrompt() {
+    const overlay = ensureUnsavedChangesModal();
+    const btnContinue = overlay.querySelector('#unsaved-continue');
+    const btnDiscard = overlay.querySelector('#unsaved-discard');
+    const btnSave = overlay.querySelector('#unsaved-save');
+    return new Promise((resolve) => {
+      function cleanup() {
+        overlay.style.opacity = '0';
+        overlay.style.visibility = 'hidden';
+        btnContinue.removeEventListener('click', onContinue);
+        btnDiscard.removeEventListener('click', onDiscard);
+        btnSave.removeEventListener('click', onSave);
+        overlay.removeEventListener('click', onOverlay);
+        document.removeEventListener('keydown', onKey);
+      }
+      function onContinue(e) { e.preventDefault(); cleanup(); resolve('continue'); }
+      function onDiscard(e) { e.preventDefault(); cleanup(); resolve('discard'); }
+      function onSave(e) { e.preventDefault(); cleanup(); resolve('save'); }
+      function onOverlay(e) { if (e.target === overlay) onContinue(e); }
+      function onKey(e) { if (e.key === 'Escape') onContinue(e); }
+      btnContinue.addEventListener('click', onContinue);
+      btnDiscard.addEventListener('click', onDiscard);
+      btnSave.addEventListener('click', onSave);
+      overlay.addEventListener('click', onOverlay);
+      document.addEventListener('keydown', onKey);
+      overlay.style.visibility = 'visible';
+      overlay.style.opacity = '1';
+      setTimeout(() => { try { btnContinue.focus(); } catch {} }, 0);
+    });
+  }
 
   // Tabs y contraer listas
   const sections = document.querySelectorAll('[data-section]'); const tabButtons = document.querySelectorAll('.tab-btn[data-tab]');
-  function showTab(tab){ sections.forEach(sec=>{ const sTab=sec.getAttribute('data-section'); if (!sTab) return; sec.classList.toggle('hidden', sTab!==tab && !(tab==='tasks' && sTab==='tasks-board')); }); tabButtons.forEach(btn=>{ btn.classList.toggle('active', btn.getAttribute('data-tab')===tab); }); }
-  tabButtons.forEach(btn=>{ btn.addEventListener('click',()=>{ const tab=btn.getAttribute('data-tab'); if (!tab) return; showTab(tab); if (tab==='errors') fetchErrors(); if (tab==='tasks') { if (typeof fetchTasks === 'function') fetchTasks(); } if (tab==='payments') { if (typeof fetchPayments === 'function') fetchPayments(); } if (tab==='notes') { if (typeof window.fetchNotes === 'function') window.fetchNotes(); } }); });
+  function showTab(tab){ closeBellDropdownAnimated(); closeAppMenuAnimated(); sections.forEach(sec=>{ const sTab=sec.getAttribute('data-section'); if (!sTab) return; sec.classList.toggle('hidden', sTab!==tab && !(tab==='tasks' && sTab==='tasks-board')); }); tabButtons.forEach(btn=>{ btn.classList.toggle('active', btn.getAttribute('data-tab')===tab); }); }
+  tabButtons.forEach(btn=>{ btn.addEventListener('click',()=>{ const tab=btn.getAttribute('data-tab'); if (!tab) return; showTab(tab); if (tab==='errors') fetchErrors(); if (tab==='tasks') { if (typeof fetchTasks === 'function') fetchTasks(); } if (tab==='payments') { setPaymentsSubtab('list'); if (typeof fetchPayments === 'function') fetchPayments(); } if (tab==='notes') { if (typeof window.fetchNotes === 'function') window.fetchNotes(); } if (tab==='profiles') { if (typeof fetchUsers === 'function') fetchUsers(); } if (tab==='activity') fetchActivityLogs(false); }); });
   function setupToggleList(buttonId, listSelector){ const btn=document.getElementById(buttonId); const list=document.querySelector(listSelector); if (!btn || !list) return; btn.addEventListener('click',()=>{ const collapsed=list.classList.toggle('collapsed'); btn.textContent = collapsed ? 'Expandir' : 'Contraer'; }); }
 
   // Persistencia de Modo P en localStorage por sección
@@ -961,6 +2690,7 @@ document.addEventListener('DOMContentLoaded', () => {
     renderTasksPage();
     updateNextTaskMarquee(filteredTasks);
     renderTasksStartAlert(filteredTasks);
+    checkTaskTimeNotifications(allTasks);
     renderWeekView(filteredTasks);
     renderTaskFilterChips();
   }
@@ -1198,7 +2928,7 @@ document.addEventListener('DOMContentLoaded', () => {
       clearInterval(intervalId);
       try { toast.remove(); } catch {}
       try {
-        const res = await fetch('/tasks/' + task.id, { method: 'DELETE' });
+        const res = await fetch('/tasks/' + task.id, { method: 'DELETE', headers: { 'x-entity-name': toHeaderSafe(task?.title) } });
         if (!res.ok) throw new Error(await res.text());
         showToast('Tarea eliminada definitivamente', 'success');
         await fetchTasks(true);
@@ -1207,7 +2937,13 @@ document.addEventListener('DOMContentLoaded', () => {
         allTasks.splice(Math.max(0, Math.min(index, allTasks.length)), 0, task);
         applyTaskFilters();
         if (isCalendarOpen()) renderCalendar();
-        await showMessageModal('No se pudo eliminar la tarea', { title: 'Error' });
+        let detail = 'No se pudo eliminar la tarea';
+        try {
+          const m = String(err?.message || '');
+          const parsed = JSON.parse(m);
+          if (parsed?.message) detail = Array.isArray(parsed.message) ? parsed.message.join(', ') : String(parsed.message);
+        } catch {}
+        await showMessageModal(detail, { title: 'Error' });
       }
     }, 5000);
 
@@ -1255,6 +2991,76 @@ document.addEventListener('DOMContentLoaded', () => {
     const dayTxt = fmtTaskDay(next.startAt);
     tasksStartAlertEl.style.display = 'block';
     tasksStartAlertEl.innerHTML = `La tarea <span class="censor-title">${escapeHtml(next.title || 'sin título')}</span> va a iniciar (${escapeHtml(dayTxt)}). Cronómetro a iniciar: <span class="censor-message live-start-countdown" data-start-at="${escapeHtml(next.startAt)}">${fmtCountdown(msLeft)}</span>`;
+  }
+  function checkTaskTimeNotifications(tasks){
+    if (!isAdminUser()) return;
+    const arr = Array.isArray(tasks) ? tasks : [];
+    arr.forEach((t) => {
+      if (!t?.id || !t?.startAt) return;
+      const status = String(getEffectiveTaskStatus(t) || '');
+      if (status === 'COMPLETED' || status === 'STOPPED') return;
+      const startMs = new Date(t.startAt).getTime();
+      const durMs = (Math.max(1, Number(t.durationMinutes || 0)) || 1) * 60_000;
+      const endMs = startMs + durMs;
+      const now = Date.now();
+      const msToStart = startMs - now;
+      const msToEnd = endMs - now;
+      const startKey = `start-${t.id}-${new Date(t.startAt).toISOString()}`;
+      const endKey = `end-${t.id}-${new Date(t.startAt).toISOString()}-${durMs}`;
+      if (msToStart > 0 && msToStart <= 3 * 60 * 60 * 1000 && !pendingTaskTimeAlerts.has(startKey)) {
+        pendingTaskTimeAlerts.add(startKey);
+        queueClientNotification(`La tarea "${String(t.title || 'sin título')}" va a iniciar pronto`, 'tasks', startKey);
+      }
+      if (msToEnd > 0 && msToEnd <= 15 * 60 * 1000 && !pendingTaskTimeAlerts.has(endKey)) {
+        pendingTaskTimeAlerts.add(endKey);
+        queueClientNotification(`La tarea "${String(t.title || 'sin título')}" va a terminar pronto`, 'tasks', endKey);
+      }
+    });
+  }
+  function buildTaskSnapshot(tasks){
+    const map = new Map();
+    (Array.isArray(tasks) ? tasks : []).forEach((t) => {
+      const id = Number(t?.id || 0);
+      if (!id) return;
+      map.set(id, {
+        id,
+        title: String(t?.title || '').trim(),
+        startAt: t?.startAt ? new Date(t.startAt).toISOString() : '',
+        durationMinutes: Math.max(1, Number(t?.durationMinutes || 0) || 0),
+        status: String(getEffectiveTaskStatus(t) || ''),
+      });
+    });
+    return map;
+  }
+  function notifyTaskDataChanges(prevSnapshot, nextTasks){
+    const prev = prevSnapshot instanceof Map ? prevSnapshot : new Map();
+    if (!prev.size) return;
+    const next = buildTaskSnapshot(nextTasks);
+    next.forEach((n, id) => {
+      const p = prev.get(id);
+      const ref = n.title || `#${id}`;
+      if (!p) {
+        queueClientNotification(`Se creó la tarea "${ref}"`, 'tasks', `task-create-${id}-${n.startAt || Date.now()}`, { action: 'POST', entityId: id });
+        return;
+      }
+      if ((p.startAt || '') !== (n.startAt || '')) {
+        queueClientNotification(`Se movió la tarea "${ref}" a ${formatDateTime(n.startAt)}`, 'tasks', `task-move-${id}-${n.startAt}`, { action: 'PATCH', entityId: id });
+      }
+      if ((p.status || '') !== (n.status || '')) {
+        queueClientNotification(`La tarea "${ref}" cambió de estado a ${String(n.status || '').replaceAll('_', ' ')}`, 'tasks', `task-status-${id}-${n.status}-${n.startAt}`, { action: 'PATCH', entityId: id });
+      }
+      if (Number(p.durationMinutes || 0) !== Number(n.durationMinutes || 0)) {
+        queueClientNotification(`Se actualizó la duración de "${ref}" a ${n.durationMinutes} min`, 'tasks', `task-duration-${id}-${n.durationMinutes}-${n.startAt}`, { action: 'PATCH', entityId: id });
+      }
+      if ((p.title || '') !== (n.title || '')) {
+        queueClientNotification(`Se actualizó el nombre de la tarea #${id}`, 'tasks', `task-title-${id}-${n.title}`, { action: 'PATCH', entityId: id });
+      }
+    });
+    prev.forEach((p, id) => {
+      if (next.has(id)) return;
+      const ref = p.title || `#${id}`;
+      queueClientNotification(`Se eliminó la tarea "${ref}"`, 'tasks', `task-delete-${id}-${Date.now()}`, { action: 'DELETE', entityId: id });
+    });
   }
   function refreshLiveStartCountdowns(){
     document.querySelectorAll('.live-start-countdown').forEach((el) => {
@@ -1350,12 +3156,16 @@ document.addEventListener('DOMContentLoaded', () => {
       if (t && t.__isGroup) {
         const li = document.createElement('li');
         applyCard(li);
+        li.setAttribute('data-entity', 'tasks-group');
+        li.setAttribute('data-group-id', String(t.id || ''));
         li.style.border = '1px solid #1f2937';
         li.style.borderRadius = '10px';
         li.style.padding = '10px';
         li.style.background = 'linear-gradient(180deg,#0b1220,#0a1326)';
         li.style.boxShadow = '0 4px 14px rgba(0,0,0,0.25)';
         li.style.marginBottom = '8px';
+        const groupDescRaw = String(t.sample?.description || '').trim();
+        const groupDescShort = groupDescRaw ? (groupDescRaw.length > 64 ? `${groupDescRaw.slice(0, 64)}...` : groupDescRaw) : '';
         li.innerHTML = `
           <div style="display:flex; align-items:center; justify-content:space-between; gap:10px; flex-wrap:wrap;">
             <strong class="censor-title">${escapeHtml(t.sample?.title || 'Tarea repetida')}</strong>
@@ -1365,7 +3175,7 @@ document.addEventListener('DOMContentLoaded', () => {
             </div>
           </div>
           <div style="margin-top:6px; color:#cbd5e1; font-size:13px;">
-            Hora: <strong>${escapeHtml(t.timeLabel)}</strong> · Repite: <strong>${escapeHtml(t.repeatLabel)}</strong> · Duración: <strong>${escapeHtml(String(t.sample?.durationMinutes || '-'))} min</strong>
+            Hora: <strong>${escapeHtml(t.timeLabel)}</strong> · Repite: <strong>${escapeHtml(t.repeatLabel)}</strong> · Duración: <strong>${escapeHtml(String(t.sample?.durationMinutes || '-'))} min</strong>${groupDescShort ? ` · Desc: <strong>${escapeHtml(groupDescShort)}</strong>` : ''}
           </div>
           <div style="margin-top:4px; color:#94a3b8; font-size:12px;">
             Este item agrupa tareas repetidas. Edita/elimina desde calendario o detalle individual.
@@ -1391,13 +3201,14 @@ document.addEventListener('DOMContentLoaded', () => {
         }
         const toggleBtn = document.createElement('button');
         toggleBtn.type = 'button';
-        toggleBtn.className = 'btn btn-neutral';
+        toggleBtn.className = 'btn btn-neutral task-group-toggle';
         toggleBtn.textContent = 'Ver detalle';
         toggleBtn.style.marginTop = '8px';
         toggleBtn.style.padding = '6px 10px';
         toggleBtn.style.fontSize = '12px';
         toggleBtn.style.borderRadius = '8px';
         const details = document.createElement('div');
+        details.setAttribute('data-group-details', '1');
         details.style.display = 'none';
         details.style.marginTop = '8px';
         details.style.borderTop = '1px solid #1f2937';
@@ -1410,6 +3221,7 @@ document.addEventListener('DOMContentLoaded', () => {
         });
         membersSorted.forEach((m) => {
           const row = document.createElement('div');
+          row.setAttribute('data-task-member-id', String(m.id));
           row.style.display = 'flex';
           row.style.justifyContent = 'space-between';
           row.style.alignItems = 'center';
@@ -1504,6 +3316,8 @@ document.addEventListener('DOMContentLoaded', () => {
       }
       const li = document.createElement('li');
       applyCard(li);
+      li.setAttribute('data-entity', 'tasks');
+      li.setAttribute('data-id', String(t.id));
       li.style.border = '1px solid #1f2937'; li.style.borderRadius='10px'; li.style.padding='10px'; li.style.background='#0b1220'; li.style.boxShadow='0 4px 14px rgba(0,0,0,0.25)'; li.style.marginBottom='8px';
       const startTxt = formatDateTime(t.startAt);
       const tagsTxt = Array.isArray(t.tags) ? t.tags.map(escapeHtml).join(', ') : escapeHtml(t.tags || '');
@@ -1552,7 +3366,7 @@ document.addEventListener('DOMContentLoaded', () => {
       const btnEdit = mkBtn('✏️ Editar', '#3b82f6', 'primary');
       const btnPause = mkBtn('Pausar', '#6b7280', 'neutral');
       const btnComplete = mkBtn('Completar', '#10b981', 'success');
-      const btnReplicate = mkBtn('Agregar replicar tarea', '#6366f1', 'primary');
+      const btnReplicate = mkBtn('+R', '#6366f1', 'primary');
       const btnDelete = mkBtn('Eliminar', '#ef4444', 'danger');
       const btnPin = mkBtn('', '#0e7490', 'neutral');
       btnPin.innerHTML = getPinIconMarkup(isPinnedTask(t.id));
@@ -1626,20 +3440,134 @@ document.addEventListener('DOMContentLoaded', () => {
     // Aplicar estilo de alineación a inputs del modal
     const overlay = document.getElementById('form-overlay');
     const bodyEl = overlay?.querySelector('#form-body');
-    if (bodyEl) { bodyEl.querySelectorAll('input, textarea').forEach(el => { el.style.background='#0b1220'; el.style.color='#e5e7eb'; el.style.border='1px solid #334155'; el.style.borderRadius='8px'; el.style.padding='8px 10px'; }); }
+    if (bodyEl) applyLoginStyleToInputs(bodyEl);
   }
   function toLocalDateTimeValue(dtLike){
     const d = new Date(dtLike);
     return `${d.getFullYear()}-${pad2(d.getMonth()+1)}-${pad2(d.getDate())}T${pad2(d.getHours())}:${pad2(d.getMinutes())}`;
   }
+  function findAvailableStartOptions(blocks, fromMs, durationMinutes, count = 5){
+    const options = [];
+    const step = 5 * 60_000;
+    const dur = Math.max(1, Number(durationMinutes || 30) || 30) * 60_000;
+    let cursor = Math.max(Number(fromMs || 0), Date.now() + 2 * 60_000);
+    cursor = Math.ceil(cursor / step) * step;
+    const limit = cursor + (7 * 24 * 60 * 60 * 1000);
+    while (cursor < limit && options.length < count) {
+      const end = cursor + dur;
+      const overlap = (blocks || []).some((b) => cursor < b.end && end > b.start);
+      if (!overlap) options.push(cursor);
+      cursor += step;
+    }
+    return options;
+  }
+  function showTaskConflictResolutionModal(conflicts, durationMinutes, blocks){
+    const items = Array.isArray(conflicts) ? conflicts : [];
+    if (!items.length) return Promise.resolve({ confirmed: false, selections: [] });
+    let overlay = document.getElementById('task-conflict-overlay');
+    if (!overlay) {
+      overlay = document.createElement('div');
+      overlay.id = 'task-conflict-overlay';
+      styleModalOverlay(overlay, '10060', 'flex');
+      overlay.style.visibility = 'hidden';
+      overlay.style.opacity = '0';
+      overlay.innerHTML = `
+        <div role="dialog" aria-modal="true" style="padding:16px;">
+          <div style="display:flex; justify-content:space-between; align-items:center; gap:8px; margin-bottom:10px;">
+            <strong style="color:#e0f2fe;">Conflictos de horario</strong>
+            <button id="task-conflict-close" class="btn btn-neutral" type="button" style="padding:4px 8px;">×</button>
+          </div>
+          <div style="color:#cbd5e1; font-size:13px; margin-bottom:10px;">Selecciona un horario disponible para cada tarea en conflicto.</div>
+          <div id="task-conflict-list" style="display:grid; gap:10px; max-height:52vh; overflow:auto;"></div>
+          <div style="display:flex; justify-content:flex-end; gap:8px; margin-top:12px;">
+            <button id="task-conflict-skip" class="btn btn-neutral" type="button">Omitir conflictos</button>
+            <button id="task-conflict-save" class="btn btn-success" type="button">Guardar horarios</button>
+          </div>
+        </div>`;
+      document.body.appendChild(overlay);
+      styleModalPanel(overlay.firstElementChild, '650px');
+    }
+    const listEl = overlay.querySelector('#task-conflict-list');
+    const btnClose = overlay.querySelector('#task-conflict-close');
+    const btnSkip = overlay.querySelector('#task-conflict-skip');
+    const btnSave = overlay.querySelector('#task-conflict-save');
+    if (listEl) {
+      listEl.innerHTML = '';
+      items.forEach((dt, idx) => {
+        const row = document.createElement('div');
+        row.style.border = '1px solid rgba(125,211,252,.35)';
+        row.style.borderRadius = '10px';
+        row.style.padding = '10px';
+        row.style.background = 'rgba(2,6,23,.38)';
+        const originalLabel = toLocalDateTimeValue(dt).replace('T', ' ');
+        const label = document.createElement('div');
+        label.style.color = '#dbeafe';
+        label.style.fontWeight = '700';
+        label.style.marginBottom = '6px';
+        label.textContent = `Conflicto #${idx + 1}: ${originalLabel}`;
+        row.appendChild(label);
+        const sel = document.createElement('select');
+        sel.className = 'input';
+        sel.id = `task-conflict-sel-${idx}`;
+        const opts = findAvailableStartOptions(blocks, dt.getTime(), durationMinutes, 6);
+        if (!opts.length) {
+          const o = document.createElement('option');
+          o.value = '';
+          o.textContent = 'Sin horarios disponibles';
+          sel.appendChild(o);
+        } else {
+          opts.forEach((ms, i) => {
+            const o = document.createElement('option');
+            o.value = String(ms);
+            o.textContent = `${i + 1}. ${formatDateTime(new Date(ms).toISOString())}`;
+            sel.appendChild(o);
+          });
+        }
+        row.appendChild(sel);
+        listEl.appendChild(row);
+      });
+    }
+    return new Promise((resolve) => {
+      function cleanup(result){
+        overlay.style.opacity = '0';
+        overlay.style.visibility = 'hidden';
+        btnClose?.removeEventListener('click', onSkip);
+        btnSkip?.removeEventListener('click', onSkip);
+        btnSave?.removeEventListener('click', onSave);
+        overlay.removeEventListener('click', onOverlay);
+        document.removeEventListener('keydown', onKey);
+        resolve(result);
+      }
+      function onSkip(e){ e?.preventDefault?.(); cleanup({ confirmed: false, selections: [] }); }
+      function onSave(e){
+        e?.preventDefault?.();
+        const selections = items.map((dt, idx) => {
+          const sel = overlay.querySelector(`#task-conflict-sel-${idx}`);
+          const v = Number(sel?.value || 0);
+          return { original: dt, selectedMs: Number.isFinite(v) && v > 0 ? v : null };
+        });
+        cleanup({ confirmed: true, selections });
+      }
+      function onOverlay(e){ if (e.target === overlay) onSkip(e); }
+      function onKey(e){ if (e.key === 'Escape') onSkip(e); }
+      btnClose?.addEventListener('click', onSkip);
+      btnSkip?.addEventListener('click', onSkip);
+      btnSave?.addEventListener('click', onSave);
+      overlay.addEventListener('click', onOverlay);
+      document.addEventListener('keydown', onKey);
+      overlay.style.visibility = 'visible';
+      overlay.style.opacity = '1';
+    });
+  }
   function openTaskCreateModal(prefill = {}){
+    const normalizedStart = String(prefill.startAt || '').trim();
     showFormModal({
       title: 'Nueva tarea',
       fields: [
         { id: 'title', label: 'Título', type: 'text', value: prefill.title || '' },
         { id: 'description', label: 'Descripción (opcional)', type: 'textarea', rows: 3, value: prefill.description || '' },
-        { id: 'startAt', label: 'Inicio', type: 'datetime-local', value: prefill.startAt || '' },
-        { id: 'durationMinutes', label: 'Duración (minutos)', type: 'number', value: prefill.durationMinutes != null ? String(prefill.durationMinutes) : '' },
+        { id: 'startAt', label: 'Inicio', type: 'datetime-local', value: normalizedStart || toLocalDateTimeValue(new Date()) },
+        { id: 'durationMinutes', label: 'Duración (minutos)', type: 'number', value: prefill.durationMinutes != null ? String(prefill.durationMinutes) : '30' },
         { id: 'repeatWeek', label: 'Repetir en la semana', type: 'select', value: prefill.repeatWeek || 'NONE', options: [
           { label: 'No repetir', value: 'NONE' },
           { label: 'Lunes a Viernes', value: 'MON_FRI' },
@@ -1730,26 +3658,31 @@ document.addEventListener('DOMContentLoaded', () => {
             created += 1;
             blocks.push({ start: startMs, end: startMs + (Math.max(1, durationMinutes || 30) * 60_000) });
           }
+          const movedHours = [];
           if (skippedConflicts.length > 0) {
-            const wantReschedule = await showConfirm(`Hay ${skippedConflicts.length} tareas con conflicto de horario. ¿Quieres cambiarlas al próximo horario disponible?`, { title: 'Conflictos detectados', confirmText: 'Cambiar horario', cancelText: 'Omitir' });
-            if (wantReschedule) {
-              for (const dt of skippedConflicts) {
-                const nextMs = findNextAvailableStart(dt.getTime());
+            const choice = await showTaskConflictResolutionModal(skippedConflicts, durationMinutes, blocks);
+            if (choice?.confirmed) {
+              for (const pick of (choice.selections || [])) {
+                const nextMs = Number(pick?.selectedMs || 0);
                 if (!nextMs) continue;
                 const payload = { ...basePayload, startAt: new Date(nextMs).toISOString() };
                 const res = await fetch('/tasks', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
                 if (res.ok) {
                   created += 1;
                   blocks.push({ start: nextMs, end: nextMs + (Math.max(1, durationMinutes || 30) * 60_000) });
+                  const fromTxt = toLocalDateTimeValue(pick.original).replace('T', ' ');
+                  const toTxt = toLocalDateTimeValue(new Date(nextMs)).replace('T', ' ');
+                  movedHours.push(`${fromTxt} → ${toTxt}`);
                 }
               }
             }
           }
           if (created > 0) showToast(`Tarea${created>1?'s':''} creada${created>1?'s':''}: ${created}`, 'success');
           await fetchTasks(true);
+          const movedMsg = movedHours.length ? `\nHorarios ajustados:\n${movedHours.slice(0,8).join('\n')}` : '';
           const msg = skipped.length
-            ? `Creadas: ${created}\nOmitidas por conflicto/pasado: ${skipped.length}\n${skipped.slice(0,6).join('\n')}`
-            : `Creadas: ${created}`;
+            ? `Guardado OK.\nCreadas: ${created}\nOmitidas por conflicto/pasado: ${skipped.length}\n${skipped.slice(0,6).join('\n')}${movedMsg}`
+            : `Guardado OK.\nCreadas: ${created}${movedMsg}`;
           await showMessageModal(msg, { title: 'Nueva tarea' });
         } catch (err) {
           console.error(err);
@@ -1759,7 +3692,7 @@ document.addEventListener('DOMContentLoaded', () => {
     });
     const overlay = document.getElementById('form-overlay');
     const bodyEl = overlay?.querySelector('#form-body');
-    if (bodyEl) { bodyEl.querySelectorAll('input, textarea').forEach(el => { el.style.background='#0b1220'; el.style.color='#e5e7eb'; el.style.border='1px solid #334155'; el.style.borderRadius='8px'; el.style.padding='8px 10px'; }); }
+    if (bodyEl) applyLoginStyleToInputs(bodyEl);
 
     const startInput = overlay?.querySelector('#startAt');
     const durationInput = overlay?.querySelector('#durationMinutes');
@@ -2097,7 +4030,10 @@ document.addEventListener('DOMContentLoaded', () => {
     try {
       const res = await fetch('/tasks');
       if (!res.ok) throw new Error('Error al obtener tareas');
-      allTasks = await res.json();
+      const serverTasks = await res.json();
+      notifyTaskDataChanges(lastTaskSnapshot, serverTasks);
+      allTasks = serverTasks;
+      lastTaskSnapshot = buildTaskSnapshot(serverTasks);
       applyTaskFilters();
       if (isCalendarOpen()) renderCalendar();
       if (!force) showTab('tasks');
@@ -2215,16 +4151,9 @@ document.addEventListener('DOMContentLoaded', () => {
     if (!overlay) {
       overlay = document.createElement('div');
       overlay.id = 'calendar-task-quick-overlay';
-      overlay.style.position = 'fixed';
-      overlay.style.inset = '0';
-      overlay.style.background = 'rgba(2,6,23,0.74)';
-      overlay.style.backdropFilter = 'blur(3px)';
-      overlay.style.display = 'none';
-      overlay.style.alignItems = 'center';
-      overlay.style.justifyContent = 'center';
-      overlay.style.zIndex = '10030';
+      styleModalOverlay(overlay, '10030');
       overlay.innerHTML = `
-        <div style="width:min(460px,92vw); background:#020617; border:1px solid #0ea5e9; border-radius:12px; padding:12px; box-shadow:0 20px 50px rgba(0,0,0,.55);">
+        <div style="padding:12px;">
           <div id="calendar-task-quick-title" style="color:#e2e8f0; font-weight:800; margin-bottom:8px;"></div>
           <div id="calendar-task-quick-info" style="color:#cbd5e1; font-size:13px; margin-bottom:10px;"></div>
           <div style="display:flex; justify-content:flex-end; gap:8px;">
@@ -2234,6 +4163,7 @@ document.addEventListener('DOMContentLoaded', () => {
           </div>
         </div>`;
       document.body.appendChild(overlay);
+      styleModalPanel(overlay.firstElementChild, '460px');
       overlay.addEventListener('click', (e) => { if (e.target === overlay) overlay.style.display = 'none'; });
       overlay.querySelector('#calendar-task-quick-close')?.addEventListener('click', () => { overlay.style.display = 'none'; });
     }
@@ -2354,23 +4284,17 @@ document.addEventListener('DOMContentLoaded', () => {
     if (!overlay) {
       overlay = document.createElement('div');
       overlay.id = 'availability-overlay';
-      overlay.style.position = 'fixed';
-      overlay.style.inset = '0';
-      overlay.style.background = 'rgba(2,6,23,0.74)';
-      overlay.style.backdropFilter = 'blur(3px)';
-      overlay.style.display = 'none';
-      overlay.style.alignItems = 'center';
-      overlay.style.justifyContent = 'center';
-      overlay.style.zIndex = '10007';
+      styleModalOverlay(overlay, '10007');
       overlay.innerHTML = `
-        <div style="width:min(760px,92vw); max-height:86vh; overflow:auto; background:#020617; border:1px solid #0ea5e9; border-radius:14px; box-shadow:0 22px 60px rgba(0,0,0,0.6), 0 0 0 1px rgba(125,211,252,0.2) inset; padding:14px;">
+        <div style="max-height:86vh; overflow:auto; padding:14px;">
           <div style="display:flex; align-items:center; justify-content:space-between; gap:8px; margin-bottom:10px;">
             <strong id="availability-title" style="color:#e2e8f0;">Horarios disponibles</strong>
-            <button id="availability-close" class="btn btn-danger" type="button">Cerrar</button>
+            <button id="availability-close" class="btn btn-neutral" type="button">Cerrar</button>
           </div>
           <div id="availability-content"></div>
         </div>`;
       document.body.appendChild(overlay);
+      styleModalPanel(overlay.firstElementChild, '760px');
       overlay.addEventListener('click', (e)=>{ if (e.target === overlay) overlay.style.display = 'none'; });
       overlay.querySelector('#availability-close')?.addEventListener('click', ()=>{ overlay.style.display = 'none'; });
     }
@@ -2474,13 +4398,13 @@ document.addEventListener('DOMContentLoaded', () => {
       const h = document.createElement('div');
       h.textContent = w;
       h.style.fontWeight = '700';
-      h.style.color = '#cbd5e1';
+      h.style.color = CALENDAR_THEME.weekHeaderText;
       h.style.textAlign = 'center';
       h.style.padding = '8px 4px';
       h.style.borderRadius = '8px';
-      h.style.background = 'linear-gradient(180deg, #0b1220, #091126)';
-      h.style.border = '1px solid #1f2937';
-      h.style.boxShadow = '0 6px 14px rgba(0,0,0,0.35)';
+      h.style.background = CALENDAR_THEME.weekHeaderBg;
+      h.style.border = CALENDAR_THEME.weekHeaderBorder;
+      h.style.boxShadow = CALENDAR_THEME.weekHeaderShadow;
       (calWeekdays || calGrid).appendChild(h);
     });
 
@@ -2508,8 +4432,14 @@ document.addEventListener('DOMContentLoaded', () => {
       dayNum.style.color = '#e5e7eb';
       header.appendChild(dayNum);
       const isPast = date < today;
-      if (isPast){ cell.style.background='#7c2d12'; cell.style.borderColor='#f59e0b'; }
-      else { cell.style.background='#0b2a5b'; cell.style.borderColor='#3b82f6'; }
+      if (isPast){
+        cell.style.background = CALENDAR_THEME.dayPastBg;
+        cell.style.borderColor = CALENDAR_THEME.dayPastBorder;
+      }
+      else {
+        cell.style.background = CALENDAR_THEME.dayFutureBg;
+        cell.style.borderColor = CALENDAR_THEME.dayFutureBorder;
+      }
 
       const dayTasks = (filteredTasks.length ? filteredTasks : allTasks).filter(t => {
         if (!t.startAt) return false;
@@ -2765,6 +4695,8 @@ document.addEventListener('DOMContentLoaded', () => {
 
       const li = document.createElement('li');
       applyCard(li);
+      li.setAttribute('data-entity', 'payments');
+      li.setAttribute('data-id', String(p.id));
       li.style.border = '1px solid #1f2937'; li.style.borderRadius='12px'; li.style.padding='12px'; li.style.background='#0b1220'; li.style.boxShadow='0 6px 18px rgba(0,0,0,0.3)'; li.style.marginBottom='10px';
 
       // cabecera banco + título
@@ -2851,19 +4783,21 @@ document.addEventListener('DOMContentLoaded', () => {
         });
       });
 
-      btnDelete.addEventListener('click', async () => {
-        const ok = await showConfirm('¿Eliminar este pago?');
-        if (!ok) return;
-        try {
-          const res = await fetch('/payments/' + p.id, { method: 'DELETE' });
-          if (!res.ok) throw new Error(await res.text());
-          showToast('Pago eliminado', 'success');
-          await fetchPayments();
-        } catch (err) {
-          console.error(err);
-          await showMessageModal('No se pudo eliminar el pago', { title: 'Error' });
-        }
-      });
+      if (!blockAdminAction(btnDelete, 'Eliminar pagos requiere rol ADMIN')) {
+        btnDelete.addEventListener('click', async () => {
+          const ok = await showConfirm('¿Eliminar este pago?');
+          if (!ok) return;
+          try {
+            const res = await fetch('/payments/' + p.id, { method: 'DELETE', headers: { 'x-entity-name': toHeaderSafe(p?.title) } });
+            if (!res.ok) throw new Error(await res.text());
+            showToast('Pago eliminado', 'success');
+            await fetchPayments();
+          } catch (err) {
+            console.error(err);
+            await showMessageModal('No se pudo eliminar el pago', { title: 'Error' });
+          }
+        });
+      }
 
       actions.appendChild(btnEdit);
       actions.appendChild(btnDelete);
@@ -2952,7 +4886,7 @@ document.addEventListener('DOMContentLoaded', () => {
       editBtn.textContent = 'Editar';
       applyBtn(editBtn, 'primary');
       editBtn.style.marginTop = '10px';
-      editBtn.addEventListener('click', () => {
+      if (!blockAdminAction(editBtn, 'Editar bancos requiere rol ADMIN')) editBtn.addEventListener('click', () => {
         showFormModal({
           title: `Editar banco ${bankKey}`,
           fields: [
@@ -3222,7 +5156,7 @@ document.addEventListener('DOMContentLoaded', () => {
       // Estilizar inputs y calendario del modal
       const overlay = document.getElementById('form-overlay');
       const bodyEl = overlay?.querySelector('#form-body');
-      if (bodyEl) { bodyEl.querySelectorAll('input, textarea').forEach(el => { el.style.background='#0b1220'; el.style.color='#e5e7eb'; el.style.border='1px solid #334155'; el.style.borderRadius='8px'; el.style.padding='8px 10px'; }); }
+      if (bodyEl) applyLoginStyleToInputs(bodyEl);
     });
   }
   // Expose payments fetch
@@ -3302,6 +5236,144 @@ document.addEventListener('DOMContentLoaded', () => {
   makeSelectSearchable(paymentsStatusSel);
   wireStaticFlatpickrInputs();
   enforceInputLimits();
+
+  function getFilteredUsers() {
+    const q = String(profilesSearchInput?.value || '').trim().toLowerCase();
+    if (!q) return allUsers;
+    return (allUsers || []).filter((u) => {
+      const hay = [u?.id, u?.email, u?.username, u?.role, u?.isActive ? 'activo' : 'inactivo', u?.createdAt]
+        .map((v) => String(v || '').toLowerCase()).join(' ');
+      return hay.includes(q);
+    });
+  }
+  function renderUsersList() {
+    if (!profilesUsersListEl) return;
+    const users = getFilteredUsers();
+    if (!users.length) {
+      profilesUsersListEl.innerHTML = '<li>Sin usuarios</li>';
+      return;
+    }
+    profilesUsersListEl.innerHTML = '';
+    users.forEach((u) => {
+      const li = document.createElement('li');
+      li.className = 'card-item';
+      li.setAttribute('data-entity', 'users');
+      li.setAttribute('data-id', String(u.id));
+      const created = u?.createdAt ? formatDateTime(u.createdAt) : '-';
+      li.innerHTML = `
+        <div style="display:flex; align-items:center; justify-content:space-between; gap:8px; flex-wrap:wrap;">
+          <strong>${escapeHtml(u.email || '-')}</strong>
+          <span style="display:inline-flex; gap:6px; align-items:center;">
+            <span style="padding:2px 8px; border-radius:999px; font-size:11px; font-weight:800; background:${u.role === 'ADMIN' ? '#1e3a8a' : '#334155'}; color:#e2e8f0;">${escapeHtml(u.role || 'USER')}</span>
+            <span style="padding:2px 8px; border-radius:999px; font-size:11px; font-weight:800; background:${u.isActive ? '#065f46' : '#7f1d1d'}; color:#e2e8f0;">${u.isActive ? 'ACTIVO' : 'INACTIVO'}</span>
+          </span>
+        </div>
+        <div style="margin-top:4px; color:#93c5fd; font-size:12px;">Username: ${escapeHtml(u.username || '-')}</div>
+        <div style="margin-top:2px; color:#94a3b8; font-size:12px;">Creado: ${escapeHtml(created)}</div>
+      `;
+      const actions = document.createElement('div');
+      actions.style.display = 'flex';
+      actions.style.gap = '8px';
+      actions.style.marginTop = '8px';
+      const btnEdit = document.createElement('button');
+      btnEdit.className = 'btn btn-primary';
+      btnEdit.textContent = '✏️ Editar';
+      btnEdit.addEventListener('click', () => {
+        showFormModal({
+          title: `Editar usuario #${u.id}`,
+          fields: [
+            { id: 'email', label: 'Email', type: 'text', value: u.email || '' },
+            { id: 'username', label: 'Username', type: 'text', value: u.username || '' },
+            { id: 'role', label: 'Rol', type: 'select', value: u.role || 'USER', options: [
+              { label: 'USER', value: 'USER' },
+              { label: 'ADMIN', value: 'ADMIN' },
+            ]},
+            { id: 'isActive', label: 'Estado', type: 'select', value: u.isActive ? 'true' : 'false', options: [
+              { label: 'ACTIVO', value: 'true' },
+              { label: 'INACTIVO', value: 'false' },
+            ]},
+            { id: 'password', label: 'Nueva contraseña (opcional)', type: 'text', value: '' },
+          ],
+          onSubmit: async (values) => {
+            const payload = {
+              email: String(values.email || '').trim().toLowerCase(),
+              username: String(values.username || '').trim() || null,
+              role: values.role || 'USER',
+              isActive: String(values.isActive || 'true') === 'true',
+              password: String(values.password || '').trim() || undefined,
+            };
+            if (!payload.password) delete payload.password;
+            const res = await fetch('/auth/users/' + u.id, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
+            if (!res.ok) throw new Error(await res.text());
+            showToast('Usuario actualizado', 'success');
+            await fetchUsers();
+          },
+        });
+      });
+      const btnDelete = document.createElement('button');
+      btnDelete.className = 'btn btn-danger';
+      btnDelete.textContent = 'Eliminar';
+      btnDelete.addEventListener('click', async () => {
+        const ok = await showConfirm(`¿Eliminar usuario ${u.email}?`, { title: 'Usuarios', confirmText: 'Eliminar', cancelText: 'Cancelar' });
+        if (!ok) return;
+        const res = await fetch('/auth/users/' + u.id, { method: 'DELETE', headers: { 'x-entity-name': toHeaderSafe(u.email) } });
+        if (!res.ok) throw new Error(await res.text());
+        showToast('Usuario eliminado', 'success');
+        await fetchUsers();
+      });
+      actions.appendChild(btnEdit);
+      actions.appendChild(btnDelete);
+      li.appendChild(actions);
+      profilesUsersListEl.appendChild(li);
+    });
+  }
+  async function fetchUsers() {
+    if (!profilesUsersListEl || !isAdminUser()) return;
+    profilesUsersListEl.innerHTML = '<li>Cargando usuarios...</li>';
+    try {
+      const res = await fetch('/auth/users');
+      if (!res.ok) throw new Error(await res.text());
+      allUsers = await res.json();
+      renderUsersList();
+    } catch (err) {
+      console.error(err);
+      profilesUsersListEl.innerHTML = '<li>Error cargando usuarios</li>';
+    }
+  }
+  profilesRefreshBtn?.addEventListener('click', fetchUsers);
+  profilesSearchInput?.addEventListener('input', renderUsersList);
+  profilesCreateBtn?.addEventListener('click', () => {
+    showFormModal({
+      title: 'Crear usuario',
+      fields: [
+        { id: 'email', label: 'Email', type: 'text', value: '' },
+        { id: 'username', label: 'Username (opcional)', type: 'text', value: '' },
+        { id: 'password', label: 'Contraseña', type: 'text', value: '' },
+        { id: 'role', label: 'Rol', type: 'select', value: 'USER', options: [
+          { label: 'USER', value: 'USER' },
+          { label: 'ADMIN', value: 'ADMIN' },
+        ]},
+        { id: 'isActive', label: 'Estado', type: 'select', value: 'true', options: [
+          { label: 'ACTIVO', value: 'true' },
+          { label: 'INACTIVO', value: 'false' },
+        ]},
+      ],
+      onSubmit: async (values) => {
+        const payload = {
+          email: String(values.email || '').trim().toLowerCase(),
+          username: String(values.username || '').trim() || undefined,
+          password: String(values.password || '').trim(),
+          role: values.role || 'USER',
+          isActive: String(values.isActive || 'true') === 'true',
+        };
+        const res = await fetch('/auth/users', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
+        if (!res.ok) throw new Error(await res.text());
+        showToast('Usuario creado', 'success');
+        await fetchUsers();
+      },
+    });
+  });
+  window.fetchUsers = fetchUsers;
 
   // Toast utility
   function showToast(message, kind = 'neutral', timeout = 2500){
@@ -3480,7 +5552,7 @@ document.addEventListener('DOMContentLoaded', () => {
         const hasFence = typeof n.content === 'string' && /^```/.test(n.content.trim());
         const langPref = (n.language || '').toLowerCase();
         const contentHtml = hasFence ? highlightJs(n.content, langPref) : (langPref === 'javascript' || langPref === 'typescript') ? highlightJs(n.content, langPref) : `<div class="censor-message" style="color:#cbd5e1; margin-top:4px; white-space:pre-wrap;">${escapeHtml(n.content || '')}</div>`;
-        return `<li class="card-item" data-id="${n.id}">`+
+        return `<li class="card-item" data-entity="notes" data-id="${n.id}">`+
                `<div style="display:flex; align-items:center; justify-content:space-between; gap:8px;">`+
                `<strong class="censor-title">${escapeHtml(n.title || '')}</strong>`+
                `<small style="color:#94a3b8;">${ts}</small>`+
@@ -3529,12 +5601,13 @@ document.addEventListener('DOMContentLoaded', () => {
           notesPage2 = 1;
           renderNotesPage();
           showToast('Nota creada', 'success');
+          queueClientNotification(`Nota "${title}" creada`, 'notes', `notes:create:${note.id}`, { action: 'POST', entityId: note.id });
         }
       });
       // Estilizar inputs del modal
       const overlay = document.getElementById('form-overlay');
       const bodyEl = overlay?.querySelector('#form-body');
-      if (bodyEl) { bodyEl.querySelectorAll('input, textarea, select').forEach(el => { el.style.background='#0b1220'; el.style.color='#e5e7eb'; el.style.border='1px solid #334155'; el.style.borderRadius='8px'; el.style.padding='8px 10px'; }); }
+      if (bodyEl) applyLoginStyleToInputs(bodyEl);
     });
     // El formulario embebido ya no se usa; asegurar que esté oculto si existe
     if (noteCreateForm) noteCreateForm.style.display = 'none';
@@ -3542,11 +5615,23 @@ document.addEventListener('DOMContentLoaded', () => {
     if (noteCreateForm) {
       noteCreateForm.replaceWith(noteCreateForm); // no-op para conservar estructura sin listeners
     }
-    notesListEl2?.addEventListener('click', (e)=>{
+    notesListEl2?.addEventListener('click', async (e)=>{
       const btn = e.target.closest('button'); if (!btn) return; const li = btn.closest('li[data-id]'); if (!li) return; const id = Number(li.getAttribute('data-id'));
       const action = btn.getAttribute('data-action');
       if (action === 'delete'){
-        allNotes2 = allNotes2.filter(n => n.id !== id); saveNotes(); renderNotesPage();
+        const note = allNotes2.find(n => n.id === id);
+        const createdTxt = note?.createdAt
+          ? new Intl.DateTimeFormat('es-CL', { day:'2-digit', month:'short', year:'numeric', hour:'2-digit', minute:'2-digit', hour12:false }).format(new Date(note.createdAt))
+          : '-';
+        const safeTitle = String(note?.title || `#${id}`).slice(0, 80);
+        const preview = `Nota: ${safeTitle}\nCreada: ${createdTxt}\n\nEsta acción no se puede deshacer.\n¿Eliminar esta nota?`;
+        const ok = await showConfirm(preview, { title: 'Confirmar eliminación', confirmText: 'Eliminar', cancelText: 'Cancelar' });
+        if (!ok) return;
+        allNotes2 = allNotes2.filter(n => n.id !== id);
+        saveNotes();
+        renderNotesPage();
+        showToast('Nota eliminada', 'success');
+        queueClientNotification(`Nota "${String(note?.title || `#${id}`)}" eliminada`, 'notes', `notes:delete:${id}`, { action: 'DELETE', entityId: id });
       } else if (action === 'edit') {
         const note = allNotes2.find(n => n.id === id); if (!note) return;
         showFormModal({
@@ -3573,19 +5658,15 @@ document.addEventListener('DOMContentLoaded', () => {
             saveNotes();
             renderNotesPage();
             showToast('Nota actualizada', 'success');
+            queueClientNotification(`Nota "${title}" actualizada`, 'notes', `notes:update:${id}`, { action: 'PATCH', entityId: id });
           }
         });
         const overlay = document.getElementById('form-overlay');
         const bodyEl = overlay?.querySelector('#form-body');
-        if (bodyEl) { bodyEl.querySelectorAll('input, textarea, select').forEach(el => { el.style.background='#0b1220'; el.style.color='#e5e7eb'; el.style.border='1px solid #334155'; el.style.borderRadius='8px'; el.style.padding='8px 10px'; }); }
+        if (bodyEl) applyLoginStyleToInputs(bodyEl);
       }
     });
-    notesCensorToggle2?.addEventListener('click', ()=>{
-      if (!notesSection) return; const on = notesSection.classList.toggle('censored'); notesCensorToggle2.textContent = `Modo P: ${on ? 'ON' : 'OFF'}`;
-    });
-    toggleNotesBtn2?.addEventListener('click', ()=>{
-      if (!notesListEl2) return; const collapsed = notesListEl2.classList.toggle('collapsed'); toggleNotesBtn2.textContent = collapsed ? 'Expandir' : 'Contraer';
-    });
+    // Los toggles de Notas (Modo P / Contraer) ya se gestionan globalmente para evitar doble toggle.
     notesPagePrev2?.addEventListener('click', ()=>{ notesPage2 = Math.max(1, notesPage2 - 1); renderNotesPage(); });
     notesPageNext2?.addEventListener('click', ()=>{ notesPage2 = notesPage2 + 1; renderNotesPage(); });
     notesPageSizeSel2?.addEventListener('change', ()=>{ notesPageSize2 = parseInt(notesPageSizeSel2.value || '10', 10) || 10; notesPage2 = 1; renderNotesPage(); });
@@ -3593,6 +5674,28 @@ document.addEventListener('DOMContentLoaded', () => {
 
     // Exponer para navegación por pestañas
     window.fetchNotes = loadNotes;
+    window.focusNoteById = async (noteIdOrTitle) => {
+      const id = Number(noteIdOrTitle);
+      const titleHint = String(noteIdOrTitle || '').trim().toLowerCase();
+      if (!Array.isArray(allNotes2) || !allNotes2.length) loadNotes();
+      if (notesSearchAnyInput2) notesSearchAnyInput2.value = '';
+      let idx = Number.isFinite(id)
+        ? allNotes2.findIndex((n) => Number(n.id) === id)
+        : -1;
+      if (idx < 0 && titleHint) {
+        idx = allNotes2.findIndex((n) => String(n?.title || '').trim().toLowerCase() === titleHint);
+      }
+      if (idx < 0) { renderNotesPage(); return false; }
+      const targetId = Number(allNotes2[idx]?.id);
+      notesPage2 = Math.floor(idx / Math.max(1, Number(notesPageSize2 || 10))) + 1;
+      renderNotesPage();
+      const node = document.querySelector(`#notes li[data-entity="notes"][data-id="${targetId}"]`);
+      if (!node) return false;
+      try { node.scrollIntoView({ behavior: 'smooth', block: 'center' }); } catch {}
+      node.classList.add('notif-jump-target');
+      setTimeout(() => node.classList.remove('notif-jump-target'), 3000);
+      return true;
+    };
 
     // Inicializar
     loadNotes();

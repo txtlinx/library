@@ -1,4 +1,5 @@
 import { Module } from '@nestjs/common';
+import { APP_INTERCEPTOR } from '@nestjs/core';
 import { ServeStaticModule } from '@nestjs/serve-static';
 import { join } from 'path';
 import { AppController } from './app.controller';
@@ -7,6 +8,9 @@ import { ErrorsModule } from './errors/errors.module';
 import { TasksModule } from './tasks/tasks.module';
 import { PaymentsModule } from './payments/payments.module';
 import { NotesModule } from './notes/notes.module';
+import { AuthModule } from './auth/auth.module';
+import { ActivityModule } from './activity/activity.module';
+import { ActivityInterceptor } from './activity/activity.interceptor';
 
 @Module({
   imports: [
@@ -22,8 +26,16 @@ import { NotesModule } from './notes/notes.module';
     TasksModule,
     PaymentsModule,
     NotesModule,
+    AuthModule,
+    ActivityModule,
   ],
   controllers: [AppController],
-  providers: [AppService],
+  providers: [
+    AppService,
+    {
+      provide: APP_INTERCEPTOR,
+      useClass: ActivityInterceptor,
+    },
+  ],
 })
 export class AppModule {}

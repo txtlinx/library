@@ -15,6 +15,7 @@
     <script src="https://cdn.jsdelivr.net/npm/sortablejs@1.15.2/Sortable.min.js"></script>
     <style>
       .topbar { position: sticky; top: 0; z-index: 1000; background: linear-gradient(180deg, rgba(2,6,23,0.95), rgba(3,12,28,0.92)); color: #fff; padding: 10px 16px; box-shadow: 0 10px 28px rgba(0,0,0,0.35), 0 0 0 1px rgba(56,189,248,0.15) inset; border-bottom: 1px solid rgba(30,64,175,0.5); backdrop-filter: blur(6px); }
+      .topbar-main { display:grid; grid-template-columns:auto minmax(200px,1fr) auto; gap:12px; align-items:center; }
       .tabs { display: flex; gap: 12px; }
       .tab-btn { background: transparent; color: #dbeafe; border: 1px solid transparent; padding: 8px 12px; border-radius: 10px; cursor: pointer; transition: all .16s ease; }
       .tab-btn:hover { border-color: rgba(56,189,248,0.35); background: rgba(15,23,42,0.65); }
@@ -28,6 +29,13 @@
         100% { transform: translateX(-100%); }
       }
       .marquee-label { margin-right: 12px; color: #cbd5e1; }
+      #auth-mini { display:flex; align-items:center; gap:8px; flex-wrap:nowrap; justify-content:flex-end; }
+      .bell-wrap { position:relative; display:inline-flex; }
+      .bell-dot { position:absolute; top:-5px; right:-5px; min-width:18px; height:18px; border-radius:999px; background:#ef4444; color:#fff; font-size:11px; font-weight:800; display:inline-flex; align-items:center; justify-content:center; padding:0 5px; }
+      @media (max-width: 980px) {
+        .topbar-main { grid-template-columns:1fr; }
+        #auth-mini { justify-content:flex-start; }
+      }
       .input-with-icon { display: flex; align-items: center; gap: 8px; }
       .input-icon { flex-shrink: 0; }
       .payments-summary-box { width:100%; background:#0a0f1e; border:1px solid #1f2937; border-radius:12px; padding:12px; box-shadow:0 10px 30px rgba(0,0,0,0.4); margin-top:12px; }
@@ -46,10 +54,10 @@
       .subtab-btn.active { color:#fff; border-bottom-color:#38bdf8; background: rgba(8,47,73,0.25); }
 
       /* Inputs alineados y consistentes en el modal de formulario */
-      .form-modal label { display:block; font-size:0.95rem; color:#e5e7eb; margin-top:8px; }
+      .form-modal label { display:block; font-size:1.1rem; color:#e5e7eb; margin-top:8px; }
       .form-modal input[type="text"],
       .form-modal input[type="file"],
-      .form-modal textarea { width:100%; box-sizing:border-box; margin-top:6px; margin-bottom:10px; padding:8px 10px; border:1px solid #1f2937; border-radius:8px; background:#0b1220; color:#e5e7eb; }
+      .form-modal textarea { width:100%; box-sizing:border-box; margin-top:6px; margin-bottom:10px; padding:8px 10px; border:1px solid #1f2937; border-radius:8px; background:#0b1220; color:#e5e7eb; font-size:1.1rem; }
       .form-modal textarea { resize:vertical; }
 
       /* Modo P: difumina contenido sensible dentro de la sección con clase .censored */
@@ -124,6 +132,7 @@
       form label {
         color: #dbeafe;
         font-weight: 700;
+        font-size: 1.1rem;
       }
       form input:not([type="checkbox"]):not([type="radio"]),
       form textarea,
@@ -133,6 +142,7 @@
         background: linear-gradient(180deg, rgba(11, 18, 32, 1), rgba(7, 15, 30, 1)) !important;
         color: #f0f9ff !important;
         box-shadow: 0 1px 0 rgba(125, 211, 252, 0.14) inset;
+        font-size: 1.1rem;
       }
       form input:focus,
       form textarea:focus,
@@ -153,57 +163,274 @@
         letter-spacing: 0.2px;
       }
 
-      /* Flatpickr theme custom */
+      /* Flatpickr: estilo azul glass acorde al tema */
       .flatpickr-calendar {
-        background: linear-gradient(180deg, #04111f 0%, #020617 100%);
-        border: 1px solid #0ea5e9;
-        box-shadow: 0 16px 38px rgba(2, 132, 199, 0.28), 0 0 0 1px rgba(125, 211, 252, 0.2) inset;
-        border-radius: 12px;
+        background: linear-gradient(180deg, rgba(5, 20, 41, 0.98) 0%, rgba(2, 10, 26, 0.98) 100%) !important;
+        border: 1px solid rgba(56, 189, 248, 0.62) !important;
+        box-shadow:
+          0 22px 50px rgba(2, 132, 199, 0.30),
+          0 0 0 1px rgba(125, 211, 252, 0.22) inset,
+          0 0 22px rgba(14, 165, 233, 0.28);
+        border-radius: 14px !important;
+        overflow: hidden;
       }
-      .flatpickr-months .flatpickr-month,
+      .flatpickr-months {
+        background: linear-gradient(135deg, rgba(8, 47, 73, 0.9), rgba(30, 64, 175, 0.7)) !important;
+        border-bottom: 1px solid rgba(125, 211, 252, 0.28);
+      }
+      .flatpickr-months .flatpickr-prev-month,
+      .flatpickr-months .flatpickr-next-month {
+        color: #e0f2fe !important;
+        fill: #e0f2fe !important;
+      }
+      .flatpickr-months .flatpickr-prev-month:hover,
+      .flatpickr-months .flatpickr-next-month:hover {
+        color: #ffffff !important;
+      }
       .flatpickr-current-month .flatpickr-monthDropdown-months,
       .flatpickr-current-month input.cur-year {
-        color: #e2e8f0 !important;
-        fill: #e2e8f0 !important;
+        color: #f0f9ff !important;
+        fill: #f0f9ff !important;
+        font-weight: 700;
       }
       .flatpickr-weekdays,
       span.flatpickr-weekday {
-        background: transparent !important;
+        background: rgba(8, 27, 58, 0.75) !important;
         color: #7dd3fc !important;
       }
+      .flatpickr-weekday {
+        font-weight: 700 !important;
+      }
+      .flatpickr-days {
+        background: linear-gradient(180deg, rgba(2, 12, 30, 0.92), rgba(3, 16, 38, 0.92));
+      }
       .flatpickr-day {
-        color: #cbd5e1;
-        border-radius: 8px;
+        color: #dbeafe;
+        border-radius: 10px !important;
+        border: 1px solid transparent;
+        transition: all .15s ease;
       }
       .flatpickr-day.today {
-        border-color: #38bdf8;
-        color: #bae6fd;
+        border-color: rgba(56, 189, 248, 0.65) !important;
+        color: #e0f2fe !important;
+        box-shadow: 0 0 0 1px rgba(56, 189, 248, 0.25) inset;
+      }
+      .flatpickr-day:hover {
+        background: rgba(14, 165, 233, 0.24) !important;
+        border-color: rgba(56, 189, 248, 0.42) !important;
+        color: #ffffff !important;
+        transform: translateY(-1px);
       }
       .flatpickr-day.selected,
       .flatpickr-day.startRange,
       .flatpickr-day.endRange {
         background: linear-gradient(135deg, #06b6d4, #2563eb) !important;
-        border-color: #7dd3fc !important;
+        border-color: rgba(186, 230, 253, 0.9) !important;
         color: #ffffff !important;
+        box-shadow: 0 8px 16px rgba(37, 99, 235, 0.35);
       }
-      .flatpickr-day:hover {
-        background: rgba(14, 165, 233, 0.2);
-        border-color: rgba(56, 189, 248, 0.35);
+      .flatpickr-day.inRange {
+        background: rgba(37, 99, 235, 0.22) !important;
+        border-color: rgba(96, 165, 250, 0.34) !important;
+      }
+      .flatpickr-day.flatpickr-disabled,
+      .flatpickr-day.flatpickr-disabled:hover {
+        color: #64748b !important;
+        background: transparent !important;
+        border-color: transparent !important;
+        transform: none;
+      }
+      .flatpickr-time {
+        background: rgba(8, 27, 58, 0.75);
+        border-top: 1px solid rgba(125, 211, 252, 0.24);
       }
       .flatpickr-time input,
       .flatpickr-time .flatpickr-am-pm {
-        color: #e2e8f0;
+        color: #e2e8f0 !important;
+      }
+      .flatpickr-time input:hover,
+      .flatpickr-time .flatpickr-am-pm:hover,
+      .flatpickr-time input:focus,
+      .flatpickr-time .flatpickr-am-pm:focus {
+        background: rgba(14, 165, 233, 0.18);
+      }
+      .flatpickr-monthSelect-month {
+        border-radius: 10px !important;
+        border: 1px solid transparent !important;
+        color: #dbeafe !important;
+      }
+      .flatpickr-monthSelect-month:hover {
+        background: rgba(14, 165, 233, 0.24) !important;
+        border-color: rgba(56, 189, 248, 0.42) !important;
+      }
+      .flatpickr-monthSelect-month.selected {
+        background: linear-gradient(135deg, #06b6d4, #2563eb) !important;
+        border-color: rgba(186, 230, 253, 0.9) !important;
+        color: #fff !important;
+      }
+
+      /* Global blue-glass theme aligned with notifications */
+      :root {
+        --ui-bg-1: #020617;
+        --ui-bg-2: #071a34;
+        --ui-bg-3: #08214a;
+        --ui-card: linear-gradient(180deg, rgba(7,19,41,.96), rgba(8,29,58,.92));
+        --ui-border: rgba(56,189,248,.30);
+        --ui-border-strong: rgba(125,211,252,.55);
+        --ui-text: #e2e8f0;
+        --ui-muted: #93c5fd;
+        --ui-shadow: 0 20px 48px rgba(2,132,199,.22);
+      }
+      body {
+        background-image:
+          radial-gradient(circle at 12% 18%, rgba(14,165,233,.16), transparent 38%),
+          radial-gradient(circle at 84% 10%, rgba(37,99,235,.18), transparent 34%),
+          linear-gradient(180deg, var(--ui-bg-1), var(--ui-bg-2) 55%, var(--ui-bg-3));
+        color: var(--ui-text);
+      }
+      .container {
+        background: linear-gradient(180deg, rgba(6,16,36,.94), rgba(8,27,58,.94)) !important;
+        border: 1px solid var(--ui-border) !important;
+        box-shadow: var(--ui-shadow), 0 0 0 1px rgba(125,211,252,.16) inset !important;
+      }
+      section,
+      .card,
+      li,
+      .card-item,
+      form {
+        background: var(--ui-card) !important;
+        border: 1px solid var(--ui-border) !important;
+        box-shadow: 0 10px 24px rgba(2,132,199,.14) !important;
+      }
+      li:hover,
+      .card:hover {
+        border-color: var(--ui-border-strong) !important;
+        box-shadow: 0 14px 30px rgba(2,132,199,.22) !important;
+      }
+      h1, h2, h3, h4, strong { color: #e0f2fe !important; }
+      small, .created-date, .legend-label { color: var(--ui-muted) !important; }
+
+      .topbar {
+        background: linear-gradient(180deg, rgba(7,26,52,.98), rgba(8,33,74,.96)) !important;
+        border-bottom: 1px solid var(--ui-border-strong) !important;
+        box-shadow: 0 18px 40px rgba(2,132,199,.24), 0 0 0 1px rgba(56,189,248,.18) inset !important;
+      }
+      .tab-btn,
+      .subtab-btn {
+        color: #bfdbfe !important;
+        border-color: transparent !important;
+      }
+      .tab-btn:hover,
+      .subtab-btn:hover {
+        background: linear-gradient(135deg, rgba(8,47,73,.45), rgba(30,64,175,.34)) !important;
+        border-color: var(--ui-border) !important;
+      }
+      .tab-btn.active,
+      .subtab-btn.active {
+        color: #fff !important;
+        background: linear-gradient(135deg, rgba(14,116,144,.54), rgba(37,99,235,.52)) !important;
+        border-color: var(--ui-border-strong) !important;
+        box-shadow: 0 10px 22px rgba(2,132,199,.24) !important;
+      }
+
+      button,
+      .btn {
+        border: 1px solid rgba(125,211,252,.35) !important;
+        box-shadow: 0 8px 18px rgba(2,132,199,.20) !important;
+      }
+      .btn.btn-primary { background: linear-gradient(135deg,#0ea5e9,#2563eb) !important; }
+      .btn.btn-success { background: linear-gradient(135deg,#059669,#0891b2) !important; }
+      .btn.btn-neutral { background: linear-gradient(135deg,#334155,#1e293b) !important; }
+      .btn.btn-danger { background: linear-gradient(135deg,#b91c1c,#dc2626) !important; }
+
+      input:not([type="checkbox"]):not([type="radio"]),
+      textarea,
+      select,
+      .input {
+        background: transparent !important;
+        border: none !important;
+        border-bottom: 1px solid rgba(125,211,252,.55) !important;
+        border-radius: 0 !important;
+        color: #e0f2fe !important;
+        box-shadow: none !important;
+        caret-color: #7dd3fc !important;
+        transition: border-bottom-color .2s ease, box-shadow .2s ease, background-color .2s ease !important;
+      }
+      input:focus,
+      textarea:focus,
+      select:focus,
+      .input:focus {
+        border-color: #67e8f9 !important;
+        border-bottom-width: 2px !important;
+        background: linear-gradient(180deg, rgba(14,165,233,.08), rgba(14,165,233,0)) !important;
+        box-shadow:
+          0 1px 0 0 rgba(56,189,248,.98),
+          0 0 14px rgba(56,189,248,.34),
+          0 12px 26px -16px rgba(2,132,199,.72) !important;
+      }
+
+      #client-info,
+      .client-item,
+      .payments-summary-box,
+      .canvas-wrap,
+      .legend-item {
+        background: var(--ui-card) !important;
+        border: 1px solid var(--ui-border) !important;
+      }
+      body[data-ui-theme="soft"] {
+        --ui-card: linear-gradient(180deg, rgba(8,20,42,.92), rgba(10,30,60,.88));
+        --ui-border: rgba(125,211,252,.22);
+        --ui-border-strong: rgba(186,230,253,.38);
+        --ui-shadow: 0 12px 28px rgba(2,132,199,.14);
+      }
+      body[data-ui-theme="midnight"] {
+        --ui-bg-1: #01030b;
+        --ui-bg-2: #061127;
+        --ui-bg-3: #0b1d45;
+        --ui-card: linear-gradient(180deg, rgba(5,12,26,.96), rgba(7,20,44,.92));
+        --ui-border: rgba(37,99,235,.30);
+        --ui-border-strong: rgba(96,165,250,.55);
+      }
+      body[data-ui-theme="aurora"] {
+        --ui-bg-1: #04101f;
+        --ui-bg-2: #072a45;
+        --ui-bg-3: #0a3b66;
+        --ui-card: linear-gradient(180deg, rgba(5,24,48,.95), rgba(8,47,73,.9));
+        --ui-border: rgba(34,211,238,.30);
+        --ui-border-strong: rgba(103,232,249,.62);
+      }
+      body[data-ui-theme="blue"] {
+        --ui-bg-1: #2c9ed8;
+        --ui-bg-2: #3a79cc;
+        --ui-bg-3: #3b4fbf;
+        --ui-card: linear-gradient(180deg, rgba(44,158,216,.28), rgba(59,79,191,.30));
+        --ui-border: rgba(219,234,254,.44);
+        --ui-border-strong: rgba(241,245,249,.82);
+        --ui-shadow: 0 16px 34px rgba(30,64,175,.28);
       }
     </style>
   </head>
   <body>
     <div class="topbar">
-      <div class="tabs">
-        <button class="tab-btn" data-tab="tasks">Tareas</button>
-        <button class="tab-btn" data-tab="payments">My Money</button>
-        <button class="tab-btn active" data-tab="notes">Notas</button>
+      <div class="topbar-main">
+        <div class="tabs">
+          <button class="tab-btn" data-tab="tasks">Tareas</button>
+          <button class="tab-btn" data-tab="payments">Mi Dinero</button>
+          <button class="tab-btn active" data-tab="notes">Notas</button>
+          <button class="tab-btn hidden" data-tab="activity" id="activity-tab-btn">Actividad</button>
+        </div>
+        <div class="topbar-marquee"><span class="marquee-track"><span class="marquee-label">Próxima tarea:</span><span id="next-task-text">cargando...</span></span></div>
+        <div id="auth-mini">
+          <button id="auth-open-btn" class="btn btn-primary" type="button">Acceso</button>
+          <span class="bell-wrap hidden" id="activity-bell-wrap">
+            <button id="activity-bell-btn" class="btn btn-neutral" type="button" title="Notificaciones">🔔</button>
+            <span id="activity-bell-dot" class="bell-dot hidden">0</span>
+          </span>
+          <button id="app-menu-btn" class="btn btn-neutral" type="button" title="Configuración" style="display:none;">⚙️</button>
+          <span id="auth-user-badge" style="color:#93c5fd; font-size:12px; font-weight:700;"></span>
+          <button id="auth-logout-btn" class="btn btn-danger" type="button" style="display:none;">Cerrar sesión</button>
+        </div>
       </div>
-      <div class="topbar-marquee"><span class="marquee-track"><span class="marquee-label">Próxima tarea:</span><span id="next-task-text">cargando...</span></span></div>
     </div>
     <div class="container">
       <h1>Bibliotecas</h1>
@@ -214,7 +441,10 @@
           <div class="client-item">
             <span class="k">IP Privada</span>
             <span class="v">IPv4: <span id="ip-v4">cargando...</span></span>
-            <span class="v" style="display:block; margin-top:3px;">IPv6: <span id="ip-v6">cargando...</span></span>
+          </div>
+          <div class="client-item">
+            <span class="k">IP Pública</span>
+            <span class="v" id="ip-public">cargando...</span>
           </div>
           <div class="client-item"><span class="k">Hora Local</span><span class="v" id="time-local">--:--:--</span></div>
           <div class="client-item"><span class="k">Hora Santiago (CL)</span><span class="v" id="time-santiago">--:--:--</span></div>
@@ -557,6 +787,30 @@
           </div>
           <ul id="notes-errors-list" class="card"></ul>
         </div>
+      </section>
+      <section id="profiles-section" data-section="profiles" class="hidden">
+        <h2>Perfiles y usuarios</h2>
+        <div style="display:flex; align-items:center; gap:8px; margin:8px 0 12px; flex-wrap:wrap;">
+          <button id="profiles-create-btn" class="btn btn-primary" type="button">Crear usuario</button>
+          <button id="profiles-refresh-btn" class="btn btn-neutral" type="button" title="Actualizar usuarios" aria-label="Actualizar usuarios">🔄</button>
+          <input id="profiles-search-input" class="input" type="text" placeholder="Buscar email, username o rol" style="max-width:340px;" />
+        </div>
+        <ul id="profiles-users-list" class="card"></ul>
+      </section>
+      <section id="activity-section" data-section="activity" class="hidden">
+        <h2>Actividad del sistema</h2>
+        <div style="display:flex; gap:8px; align-items:center; margin:8px 0 12px;">
+          <button id="activity-refresh-btn" class="btn btn-primary" type="button">Actualizar</button>
+          <label style="display:inline-flex; gap:6px; align-items:center; color:#94a3b8;">Límite
+            <select id="activity-limit" class="input" style="max-width:100px;">
+              <option value="50">50</option>
+              <option value="100" selected>100</option>
+              <option value="200">200</option>
+            </select>
+          </label>
+        </div>
+        <div id="activity-type-summary" style="display:flex; gap:8px; flex-wrap:wrap; margin:6px 0 12px;"></div>
+        <ul id="activity-list" class="card"></ul>
       </section>
     </div>
     <script src="https://cdn.jsdelivr.net/npm/flatpickr"></script>

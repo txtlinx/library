@@ -1,7 +1,10 @@
-import { Body, Controller, Delete, Get, Param, ParseIntPipe, Patch, Post, Query } from '@nestjs/common';
+import { Body, Controller, Delete, Get, Param, ParseIntPipe, Patch, Post, Query, UseGuards } from '@nestjs/common';
 import { ApiBody, ApiOperation, ApiParam, ApiQuery, ApiResponse, ApiTags } from '@nestjs/swagger';
 import { CreateTaskDto, UpdateTaskDto } from '../dto/create-task.dto';
 import { TasksService } from '../service/tasks.service';
+import { AuthGuard } from '../../auth/auth.guard';
+import { RolesGuard } from '../../auth/roles.guard';
+import { Roles } from '../../auth/roles.decorator';
 
 @ApiTags('tasks')
 @Controller('tasks')
@@ -41,6 +44,8 @@ export class TasksController {
   }
 
   @Delete(':id')
+  @UseGuards(AuthGuard, RolesGuard)
+  @Roles('ADMIN')
   @ApiOperation({ summary: 'Eliminar una tarea por id' })
   @ApiParam({ name: 'id', required: true, description: 'ID de la tarea', example: 1 })
   @ApiResponse({ status: 200, description: 'Eliminada correctamente' })

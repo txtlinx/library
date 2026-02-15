@@ -1,4 +1,4 @@
-import { Body, Controller, Delete, Get, Param, ParseIntPipe, Patch, Post, Query, UploadedFiles, UseInterceptors } from '@nestjs/common';
+import { Body, Controller, Delete, Get, Param, ParseIntPipe, Patch, Post, Query, UploadedFiles, UseGuards, UseInterceptors } from '@nestjs/common';
 import { ApiTags, ApiOperation, ApiResponse, ApiBody, ApiParam, ApiQuery, ApiConsumes } from '@nestjs/swagger';
 import { CreateErrorDto, UpdateErrorDto } from '../dto/create-error.dto';
 import { ErrorResponseDto } from '../dto/error-response.dto';
@@ -7,6 +7,9 @@ import { FileFieldsInterceptor, FilesInterceptor } from '@nestjs/platform-expres
 import { diskStorage } from 'multer';
 import { Multer } from 'multer';
 import { join } from 'path';
+import { AuthGuard } from '../../auth/auth.guard';
+import { RolesGuard } from '../../auth/roles.guard';
+import { Roles } from '../../auth/roles.decorator';
 
 @ApiTags('errors')
 @Controller('errors')
@@ -54,6 +57,8 @@ export class ErrorsController {
     }
 
     @Delete(':id')
+    @UseGuards(AuthGuard, RolesGuard)
+    @Roles('ADMIN')
     @ApiOperation({ summary: 'Eliminar un error por id' })
     @ApiParam({ name: 'id', required: true, description: 'ID del error', example: 1 })
     @ApiResponse({ status: 200, description: 'Eliminado correctamente' })
@@ -76,6 +81,7 @@ export class ErrorsController {
     }
 
     @Post(':id/images')
+    @UseGuards(AuthGuard)
     @ApiOperation({ summary: 'Subir imágenes para un error' })
     @ApiParam({ name: 'id', required: true, description: 'ID del error' })
     @ApiConsumes('multipart/form-data')

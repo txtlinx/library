@@ -1,6 +1,9 @@
-import { Body, Controller, Delete, Get, Param, Post, Put, Patch, BadRequestException, ParseIntPipe, Query } from '@nestjs/common';
+import { Body, Controller, Delete, Get, Param, Post, Put, Patch, BadRequestException, ParseIntPipe, Query, UseGuards } from '@nestjs/common';
 import { ApiBody, ApiOperation, ApiParam, ApiResponse, ApiTags } from '@nestjs/swagger';
 import { PaymentsService } from '../service/payments.service';
+import { AuthGuard } from '../../auth/auth.guard';
+import { RolesGuard } from '../../auth/roles.guard';
+import { Roles } from '../../auth/roles.decorator';
 
 const BANKS = ['FALABELLA', 'ESTADO', 'CHILE', 'SANTANDER'] as const;
 const STATUSES = ['PAID', 'PAYING', 'PAUSED'] as const;
@@ -105,6 +108,8 @@ export class PaymentsController {
   }
 
   @Delete(':id')
+  @UseGuards(AuthGuard, RolesGuard)
+  @Roles('ADMIN')
   @ApiOperation({ summary: 'Eliminar un pago por id' })
   @ApiParam({ name: 'id', required: true, description: 'ID del pago', example: 1 })
   @ApiResponse({ status: 200, description: 'Eliminado correctamente' })
