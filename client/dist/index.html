@@ -73,6 +73,17 @@
       #payments-section.censored .censor-title,
       #payments-section.censored .censor-message,
       #payments-section.censored .censor-tags { filter: blur(6px); }
+      body.global-censored .censor-title,
+      body.global-censored .censor-message,
+      body.global-censored .censor-solution,
+      body.global-censored .censor-tags { filter: blur(6px); }
+      body.global-censored #payments-section .legend-label,
+      body.global-censored #payments-section .legend-value,
+      body.global-censored #payments-section .canvas-title,
+      body.global-censored #payments-section #payments-pie,
+      body.global-censored #payments-section #payments-line {
+        filter: blur(6px);
+      }
 
       /* Colapsar listas */
       .collapsible.collapsed { display:none; }
@@ -349,24 +360,32 @@
       .input {
         background: transparent !important;
         border: none !important;
-        border-bottom: 1px solid rgba(125,211,252,.55) !important;
+        border-bottom: 2px solid rgba(125,211,252,.75) !important;
         border-radius: 0 !important;
         color: #e0f2fe !important;
         box-shadow: none !important;
         caret-color: #7dd3fc !important;
         transition: border-bottom-color .2s ease, box-shadow .2s ease, background-color .2s ease !important;
       }
+      input:not([type="checkbox"]):not([type="radio"]):hover,
+      textarea:hover,
+      select:hover,
+      .input:hover {
+        border-bottom-color: rgba(103,232,249,.92) !important;
+        box-shadow: 0 1px 0 0 rgba(56,189,248,.92), 0 8px 16px -14px rgba(14,165,233,.55) !important;
+      }
       input:focus,
       textarea:focus,
       select:focus,
       .input:focus {
-        border-color: #67e8f9 !important;
-        border-bottom-width: 2px !important;
-        background: linear-gradient(180deg, rgba(14,165,233,.08), rgba(14,165,233,0)) !important;
+        border-color: #22d3ee !important;
+        border-bottom-width: 3px !important;
+        background: linear-gradient(180deg, rgba(14,165,233,.14), rgba(14,165,233,0)) !important;
         box-shadow:
-          0 1px 0 0 rgba(56,189,248,.98),
-          0 0 14px rgba(56,189,248,.34),
-          0 12px 26px -16px rgba(2,132,199,.72) !important;
+          0 2px 0 0 rgba(34,211,238,.98),
+          0 0 20px rgba(34,211,238,.55),
+          0 16px 28px -14px rgba(2,132,199,.82),
+          0 0 0 1px rgba(103,232,249,.22) inset !important;
       }
 
       #client-info,
@@ -408,6 +427,71 @@
         --ui-border-strong: rgba(241,245,249,.82);
         --ui-shadow: 0 16px 34px rgba(30,64,175,.28);
       }
+      body[data-ui-theme="white"] {
+        --ui-bg-1: #f8fafc;
+        --ui-bg-2: #eef2f7;
+        --ui-bg-3: #e2e8f0;
+        --ui-card: linear-gradient(180deg, rgba(255,255,255,.98), rgba(248,250,252,.96));
+        --ui-border: rgba(148,163,184,.35);
+        --ui-border-strong: rgba(100,116,139,.55);
+        --ui-text: #0f172a;
+        --ui-muted: #475569;
+        --ui-shadow: 0 14px 28px rgba(15,23,42,.10);
+      }
+      body[data-ui-theme="white"] .topbar {
+        background: linear-gradient(180deg, rgba(255,255,255,.98), rgba(248,250,252,.95)) !important;
+        border-bottom: 1px solid rgba(148,163,184,.35) !important;
+        box-shadow: 0 10px 24px rgba(15,23,42,.10), 0 0 0 1px rgba(148,163,184,.16) inset !important;
+      }
+      body[data-ui-theme="white"] h1,
+      body[data-ui-theme="white"] h2,
+      body[data-ui-theme="white"] h3,
+      body[data-ui-theme="white"] h4,
+      body[data-ui-theme="white"] strong,
+      body[data-ui-theme="white"] small,
+      body[data-ui-theme="white"] .created-date,
+      body[data-ui-theme="white"] .legend-label,
+      body[data-ui-theme="white"] .legend-value {
+        color: #0f172a !important;
+      }
+      body[data-ui-theme="white"] .tab-btn,
+      body[data-ui-theme="white"] .subtab-btn {
+        color: #334155 !important;
+      }
+      body[data-ui-theme="white"] .tab-btn.active,
+      body[data-ui-theme="white"] .subtab-btn.active {
+        color: #0f172a !important;
+        background: linear-gradient(135deg, rgba(203,213,225,.65), rgba(226,232,240,.8)) !important;
+        border-color: rgba(100,116,139,.45) !important;
+        box-shadow: 0 8px 18px rgba(15,23,42,.12) !important;
+      }
+      body[data-ui-theme="white"] .btn {
+        color: #0f172a !important;
+        border-color: rgba(148,163,184,.45) !important;
+        box-shadow: 0 8px 16px rgba(15,23,42,.08) !important;
+      }
+      body[data-ui-theme="white"] .btn.btn-primary { background: linear-gradient(135deg,#dbeafe,#bfdbfe) !important; }
+      body[data-ui-theme="white"] .btn.btn-success { background: linear-gradient(135deg,#dcfce7,#bbf7d0) !important; }
+      body[data-ui-theme="white"] .btn.btn-neutral { background: linear-gradient(135deg,#f1f5f9,#e2e8f0) !important; }
+      body[data-ui-theme="white"] .btn.btn-danger { background: linear-gradient(135deg,#fee2e2,#fecaca) !important; }
+      body[data-ui-theme="white"] input:not([type="checkbox"]):not([type="radio"]),
+      body[data-ui-theme="white"] textarea,
+      body[data-ui-theme="white"] select,
+      body[data-ui-theme="white"] .input {
+        color: #0f172a !important;
+        border-bottom-color: rgba(100,116,139,.7) !important;
+      }
+      body[data-ui-theme="white"] input:focus,
+      body[data-ui-theme="white"] textarea:focus,
+      body[data-ui-theme="white"] select:focus,
+      body[data-ui-theme="white"] .input:focus {
+        border-bottom-color: #1d4ed8 !important;
+        box-shadow:
+          0 2px 0 0 rgba(37,99,235,.9),
+          0 0 18px rgba(37,99,235,.28),
+          0 12px 24px -14px rgba(37,99,235,.3),
+          0 0 0 1px rgba(59,130,246,.18) inset !important;
+      }
     </style>
   </head>
   <body>
@@ -426,6 +510,7 @@
             <button id="activity-bell-btn" class="btn btn-neutral" type="button" title="Notificaciones">🔔</button>
             <span id="activity-bell-dot" class="bell-dot hidden">0</span>
           </span>
+          <button id="global-censor-btn" class="btn btn-neutral" type="button" title="Modo P global">👁️</button>
           <button id="app-menu-btn" class="btn btn-neutral" type="button" title="Configuración" style="display:none;">⚙️</button>
           <span id="auth-user-badge" style="color:#93c5fd; font-size:12px; font-weight:700;"></span>
           <button id="auth-logout-btn" class="btn btn-danger" type="button" style="display:none;">Cerrar sesión</button>
@@ -499,7 +584,7 @@
           <button type="submit">Crear tarea</button>
         </form>
 
-        <h2 style="margin-top: 16px;">Lista de tareas <button id="toggle-tasks" class="toggle-list-btn" type="button">Contraer</button> <button id="tasks-censor-toggle" type="button" title="Ocultar contenido" style="background:#6b7280; margin-left:8px;">Modo P: OFF</button> <button id="tasks-calendar-btn" type="button" title="Calendario" style="background:#374151; margin-left:8px; display:inline-flex; align-items:center; gap:6px;">📅 Calendario</button></h2>
+        <h2 style="margin-top: 16px;">Lista de tareas <button id="toggle-tasks" class="toggle-list-btn" type="button">Contraer</button> <button id="tasks-calendar-btn" type="button" title="Calendario" style="background:#374151; margin-left:8px; display:inline-flex; align-items:center; gap:6px;">📅 Calendario</button></h2>
         <div id="tasks-start-alert" class="card" style="display:none; margin:8px 0 10px; padding:10px; border:1px solid #f59e0b; background:linear-gradient(180deg,#7c2d12,#5b1e0d); color:#fde68a; font-weight:700;"></div>
         <!-- Filtros superiores removidos -->
         <!--
@@ -649,7 +734,7 @@
           <button type="submit">Crear pago</button>
         </form>
 
-        <h2 style="margin-top: 16px;">Lista de pagos <button id="toggle-payments" class="btn btn-neutral toggle-list-btn" type="button">Contraer</button> <button id="payments-censor-toggle" type="button" class="btn btn-neutral" title="Ocultar contenido">Modo P: OFF</button> <button id="payments-refresh" type="button" class="btn btn-neutral" title="Ver todos">↻</button></h2>
+        <h2 style="margin-top: 16px;">Lista de pagos <button id="toggle-payments" class="btn btn-neutral toggle-list-btn" type="button">Contraer</button> <button id="payments-refresh" type="button" class="btn btn-neutral" title="Ver todos">↻</button></h2>
         <!-- Filtros superiores removidos -->
         <!--
         <div class="filters-row" style="margin-bottom:12px;">
@@ -750,7 +835,7 @@
           <button type="submit">Crear nota</button>
         </form>
 
-        <h2 style="margin-top: 16px;">Notas <button id="toggle-notes" class="btn btn-neutral toggle-list-btn" type="button">Contraer</button> <button id="notes-censor-toggle" type="button" class="btn btn-neutral" title="Ocultar contenido">Modo P: OFF</button></h2>
+        <h2 style="margin-top: 16px;">Notas <button id="toggle-notes" class="btn btn-neutral toggle-list-btn" type="button">Contraer</button></h2>
         <div id="notes-pagination" style="display:flex; align-items:center; gap:8px; margin:8px 0;">
           <button id="notes-page-prev" class="btn btn-neutral" type="button">◀</button>
           <span id="notes-page-info" style="color:#94a3b8;"></span>
@@ -816,6 +901,7 @@
     <script src="https://cdn.jsdelivr.net/npm/flatpickr"></script>
     <script src="https://cdn.jsdelivr.net/npm/flatpickr/dist/plugins/monthSelect/index.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/flatpickr/dist/l10n/es.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/animejs@3.2.1/lib/anime.min.js"></script>
     <script src="/main.js"></script>
   </body>
 </html>

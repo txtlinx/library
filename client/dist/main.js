@@ -91,6 +91,7 @@ document.addEventListener('DOMContentLoaded', () => {
   const activityBellWrap = document.getElementById('activity-bell-wrap');
   const activityBellBtn = document.getElementById('activity-bell-btn');
   const activityBellDot = document.getElementById('activity-bell-dot');
+  const globalCensorBtn = document.getElementById('global-censor-btn');
   const appMenuBtn = document.getElementById('app-menu-btn');
   const authOpenBtn = document.getElementById('auth-open-btn');
   const authLogoutBtn = document.getElementById('auth-logout-btn');
@@ -145,6 +146,9 @@ document.addEventListener('DOMContentLoaded', () => {
   let notesPage = 1;
   let notesPageSize = 10;
   let allUsers = [];
+  let minimizedForms = [];
+  let minimizedFormSeq = 1;
+  let formOpenFromRect = null;
 
   const STATUS_ES = { PAYING: 'Pagando', PAID: 'Pagado', PAUSED: 'Detenido' };
   const STATUS_BADGE = {
@@ -171,10 +175,15 @@ document.addEventListener('DOMContentLoaded', () => {
   const ACTIVITY_ITEMS_KEY = 'activity_items_v1';
   const ACTIVITY_READ_IDS_KEY = 'activity_read_ids_v1';
   const ACTIVITY_PINNED_KEYS = 'activity_pinned_keys_v1';
+  const GLOBAL_CENSOR_KEY = 'global_censor_v1';
+  const MINIMIZED_FORMS_KEY = 'minimized_forms_v1';
+  const MINIMIZED_HOST_POS_KEY = 'minimized_forms_host_pos_v1';
   const UI_THEME_KEY = 'ui_theme_v1';
+  const FORM_ANIM_KEY = 'form_anim_preset_v1';
   let bellOutsideClickHandler = null;
   let bellKeydownHandler = null;
   let activityLatestItems = [];
+  let minimizedHostPos = null;
 
   function getAuthToken() {
     try { return localStorage.getItem(AUTH_TOKEN_KEY) || ''; } catch { return ''; }
@@ -506,17 +515,226 @@ document.addEventListener('DOMContentLoaded', () => {
     try { return localStorage.getItem(UI_THEME_KEY) || 'default'; } catch { return 'default'; }
   }
   function setUiTheme(theme) {
-    const allowed = new Set(['default', 'soft', 'midnight', 'aurora', 'blue']);
+    const allowed = new Set(['default', 'soft', 'midnight', 'aurora', 'blue', 'white']);
     const next = allowed.has(String(theme || '')) ? String(theme) : 'default';
     document.body.setAttribute('data-ui-theme', next);
     try { localStorage.setItem(UI_THEME_KEY, next); } catch {}
+  }
+  function getFormAnimPreset() {
+    try {
+      const raw = String(localStorage.getItem(FORM_ANIM_KEY) || 'default');
+      const allowed = new Set(['default', 'smooth', 'snap', 'genie']);
+      return allowed.has(raw) ? raw : 'default';
+    } catch {
+      return 'default';
+    }
+  }
+  function setFormAnimPreset(preset) {
+    const raw = String(preset || 'default');
+    const allowed = new Set(['default', 'smooth', 'snap', 'genie']);
+    const next = allowed.has(raw) ? raw : 'default';
+    try { localStorage.setItem(FORM_ANIM_KEY, next); } catch {}
+  }
+  function runFormOpenAnimation(panel, fromRect, preset = 'default') {
+    const anime = window.anime;
+    if (!panel || !fromRect || typeof anime !== 'function') return false;
+    const to = panel.getBoundingClientRect();
+    const dx = (fromRect.left + fromRect.width / 2) - (to.left + to.width / 2);
+    const dy = (fromRect.top + fromRect.height / 2) - (to.top + to.height / 2);
+    panel.style.transformOrigin = 'center center';
+    if (preset === 'genie') {
+      anime.set(panel, { translateX: dx, translateY: dy, scaleX: 0.08, scaleY: 0.18, skewX: 16, opacity: 0.03 });
+      anime.timeline({ targets: panel })
+        .add({
+          translateX: dx * 0.62,
+          translateY: dy * 0.44,
+          scaleX: 0.36,
+          scaleY: 0.48,
+          skewX: -12,
+          opacity: 0.7,
+          duration: 280,
+          easing: 'easeOutQuart',
+        })
+        .add({
+          translateX: 0,
+          translateY: 0,
+          scaleX: 1.03,
+          scaleY: 0.96,
+          skewX: 3,
+          opacity: 1,
+          duration: 260,
+          easing: 'easeOutCubic',
+        })
+        .add({
+          scaleX: 1,
+          scaleY: 1,
+          skewX: 0,
+          duration: 220,
+          easing: 'easeOutElastic(1, .86)',
+        });
+      return true;
+    }
+    if (preset === 'smooth') {
+      anime.set(panel, { translateX: dx, translateY: dy, scale: 0.34, rotate: 4, opacity: 0.1 });
+      anime({
+        targets: panel,
+        translateX: 0,
+        translateY: 0,
+        scale: 1,
+        rotate: 0,
+        opacity: 1,
+        duration: 420,
+        easing: 'easeOutExpo',
+      });
+      return true;
+    }
+    if (preset === 'snap') {
+      anime.set(panel, { translateX: dx, translateY: dy, scale: 0.22, rotate: 0, opacity: 0.08 });
+      anime({
+        targets: panel,
+        translateX: 0,
+        translateY: 0,
+        scale: [0.22, 1.04, 1],
+        rotate: 0,
+        opacity: [0.08, 1],
+        duration: 300,
+        easing: 'easeOutQuad',
+      });
+      return true;
+    }
+    anime.set(panel, { translateX: dx, translateY: dy, scale: 0.28, rotate: 10, opacity: 0.12 });
+    anime.timeline({ targets: panel })
+      .add({
+        translateX: 0,
+        translateY: 0,
+        scale: 1.03,
+        rotate: -2,
+        opacity: 1,
+        duration: 340,
+        easing: 'easeOutCubic',
+      })
+      .add({
+        scale: 1,
+        rotate: 0,
+        duration: 230,
+        easing: 'easeOutElastic(1, .82)',
+      });
+    return true;
+  }
+  function runFormMinimizeAnimation(panel, targetChip, dx, dy, preset = 'default', onDone = () => {}) {
+    const anime = window.anime;
+    if (!panel || !targetChip || typeof anime !== 'function') {
+      onDone();
+      return;
+    }
+    targetChip.style.opacity = '0.35';
+    panel.style.transformOrigin = 'center center';
+    if (preset === 'genie') {
+      anime.timeline({ targets: panel, complete: () => {
+        anime({
+          targets: targetChip,
+          scale: [0.86, 1.08, 1],
+          opacity: [0.45, 1],
+          duration: 360,
+          easing: 'easeOutElastic(1, .82)',
+        });
+        onDone();
+      }})
+        .add({
+          translateX: dx * 0.46,
+          translateY: dy * 0.36,
+          scaleX: 0.58,
+          scaleY: 0.72,
+          skewX: 10,
+          opacity: 0.74,
+          duration: 240,
+          easing: 'easeInOutQuad',
+        })
+        .add({
+          translateX: dx,
+          translateY: dy,
+          scaleX: 0.08,
+          scaleY: 0.18,
+          skewX: -16,
+          opacity: 0.02,
+          duration: 340,
+          easing: 'easeInQuart',
+        });
+      return;
+    }
+    if (preset === 'smooth') {
+      anime({
+        targets: panel,
+        translateX: dx,
+        translateY: dy,
+        scale: 0.36,
+        rotate: -4,
+        opacity: 0.08,
+        duration: 340,
+        easing: 'easeInOutCubic',
+        complete: () => {
+          anime({
+            targets: targetChip,
+            scale: [0.95, 1.02, 1],
+            opacity: [0.55, 1],
+            duration: 220,
+            easing: 'easeOutQuad',
+          });
+          onDone();
+        }
+      });
+      return;
+    }
+    if (preset === 'snap') {
+      anime({
+        targets: panel,
+        translateX: dx,
+        translateY: dy,
+        scale: 0.2,
+        rotate: 0,
+        opacity: 0.04,
+        duration: 220,
+        easing: 'easeInQuad',
+        complete: () => {
+          anime({
+            targets: targetChip,
+            scale: [0.88, 1.03, 1],
+            opacity: [0.45, 1],
+            duration: 180,
+            easing: 'easeOutQuad',
+          });
+          onDone();
+        }
+      });
+      return;
+    }
+    anime({
+      targets: panel,
+      translateX: dx,
+      translateY: dy,
+      scale: 0.28,
+      rotate: -10,
+      opacity: 0.12,
+      duration: 460,
+      easing: 'easeInOutCubic',
+      complete: () => {
+        anime({
+          targets: targetChip,
+          scale: [0.92, 1.04, 1],
+          opacity: [0.45, 1],
+          duration: 380,
+          easing: 'easeOutElastic(1, .72)',
+        });
+        onDone();
+      }
+    });
   }
   function closeAppMenuAnimated() {
     const menu = document.getElementById('app-menu-dropdown');
     if (!menu || menu.style.display === 'none') return;
     menu.style.opacity = '0';
     menu.style.transform = 'translateY(-10px) scale(.97)';
-    setTimeout(() => { menu.style.display = 'none'; }, 220);
+    setTimeout(() => { menu.style.display = 'none'; syncFloatingPanelsLayout(); }, 220);
   }
   async function logoutFlow() {
     const ok = await openLogoutConfirmModal();
@@ -549,27 +767,46 @@ document.addEventListener('DOMContentLoaded', () => {
     const isOpen = menu.style.display === 'block';
     if (isOpen) { closeAppMenuAnimated(); return; }
     const currentTheme = getUiTheme();
+    const currentAnim = getFormAnimPreset();
     const styles = [
       { id: 'default', label: 'Actual (Default)' },
       { id: 'blue', label: 'Blue' },
+      { id: 'white', label: 'Blanco' },
       { id: 'soft', label: 'Menos intenso' },
       { id: 'midnight', label: 'Midnight' },
       { id: 'aurora', label: 'Aurora' },
     ];
+    const animations = [
+      { id: 'default', label: 'Actual (Default)' },
+      { id: 'smooth', label: 'Suave' },
+      { id: 'snap', label: 'Rápida' },
+      { id: 'genie', label: 'Aladino (Genie)' },
+    ];
+    const sectionShell = 'border:1px solid rgba(56,189,248,.28); border-radius:10px; padding:0; background:linear-gradient(180deg, rgba(7,19,41,.96), rgba(8,29,58,.92)); overflow:hidden;';
+    const sectionSummary = 'cursor:pointer; color:#93c5fd; font-size:12px; font-weight:700; padding:10px 12px; user-select:none; display:flex; align-items:center; justify-content:space-between; gap:8px;';
+    const sectionBody = 'padding:0 10px 10px;';
     const adminSection = isAdminUser() ? `
-      <div style="margin-top:10px; border:1px solid rgba(56,189,248,.28); border-radius:10px; padding:10px; background:linear-gradient(180deg, rgba(7,19,41,.96), rgba(8,29,58,.92));">
-        <div style="color:#93c5fd; font-size:12px; font-weight:700; margin-bottom:8px;">Administración</div>
-        <button id="app-menu-users" class="btn btn-neutral" type="button" style="width:100%; justify-content:flex-start; text-align:left; padding:7px 10px; font-size:12px; border-radius:9px; background:linear-gradient(135deg,#334155,#1e293b);">Perfiles y usuarios</button>
-      </div>
+      <details open style="${sectionShell} margin-top:10px;">
+        <summary style="${sectionSummary}">Administración <span style="color:#7dd3fc;">▾</span></summary>
+        <div style="${sectionBody}">
+          <button id="app-menu-users" class="btn btn-neutral" type="button" style="width:100%; justify-content:flex-start; text-align:left; padding:7px 10px; font-size:12px; border-radius:9px; background:linear-gradient(135deg,#334155,#1e293b);">Perfiles y usuarios</button>
+        </div>
+      </details>
     ` : '';
     menu.innerHTML = `
       <div style="color:#e0f2fe; font-weight:800; margin-bottom:8px;">Configuración</div>
-      <div style="border:1px solid rgba(56,189,248,.28); border-radius:10px; padding:10px; background:linear-gradient(180deg, rgba(7,19,41,.96), rgba(8,29,58,.92));">
-        <div style="color:#93c5fd; font-size:12px; font-weight:700; margin-bottom:8px;">Estilos</div>
-        <div style="display:flex; flex-direction:column; gap:6px;">
+      <details open style="${sectionShell}">
+        <summary style="${sectionSummary}">Estilos <span style="color:#7dd3fc;">▾</span></summary>
+        <div style="${sectionBody} display:flex; flex-direction:column; gap:6px;">
           ${styles.map((s) => `<button class="app-theme-btn btn btn-neutral" type="button" data-theme="${s.id}" style="justify-content:flex-start; text-align:left; padding:7px 10px; font-size:12px; border-radius:9px; background:${currentTheme === s.id ? 'linear-gradient(135deg,#0ea5e9,#2563eb)' : 'linear-gradient(135deg,#334155,#1e293b)'};">${s.label}</button>`).join('')}
         </div>
-      </div>
+      </details>
+      <details style="${sectionShell} margin-top:10px;">
+        <summary style="${sectionSummary}">Animación ventanas <span style="color:#7dd3fc;">▾</span></summary>
+        <div style="${sectionBody} display:flex; flex-direction:column; gap:6px;">
+          ${animations.map((a) => `<button class="app-anim-btn btn btn-neutral" type="button" data-anim="${a.id}" style="justify-content:flex-start; text-align:left; padding:7px 10px; font-size:12px; border-radius:9px; background:${currentAnim === a.id ? 'linear-gradient(135deg,#0ea5e9,#2563eb)' : 'linear-gradient(135deg,#334155,#1e293b)'};">${a.label}</button>`).join('')}
+        </div>
+      </details>
       ${adminSection}
       <div style="margin-top:10px; border-top:1px solid rgba(125,211,252,.24); padding-top:10px; display:flex; justify-content:flex-end;">
         <button id="app-menu-logout" class="btn btn-danger" type="button" style="padding:7px 12px; border-radius:9px;">Cerrar sesión</button>
@@ -579,6 +816,13 @@ document.addEventListener('DOMContentLoaded', () => {
       b.addEventListener('click', () => {
         const t = b.getAttribute('data-theme') || 'default';
         setUiTheme(t);
+        openAppMenu();
+      });
+    });
+    menu.querySelectorAll('.app-anim-btn').forEach((b) => {
+      b.addEventListener('click', () => {
+        const v = b.getAttribute('data-anim') || 'default';
+        setFormAnimPreset(v);
         openAppMenu();
       });
     });
@@ -595,6 +839,7 @@ document.addEventListener('DOMContentLoaded', () => {
       menu.style.opacity = '1';
       menu.style.transform = 'translateY(0) scale(1)';
     });
+    syncFloatingPanelsLayout();
     const closeOnOutside = (e) => {
       if (!menu.contains(e.target) && e.target !== appMenuBtn) closeAppMenuAnimated();
     };
@@ -788,8 +1033,10 @@ document.addEventListener('DOMContentLoaded', () => {
     }
     dropdown.style.opacity = '0';
     dropdown.style.transform = 'translateY(-10px) scale(.97)';
+    syncFloatingPanelsLayout();
     setTimeout(() => {
       dropdown.style.display = 'none';
+      syncFloatingPanelsLayout();
     }, 460);
   }
   function openBellNotifications(evt) {
@@ -992,6 +1239,7 @@ document.addEventListener('DOMContentLoaded', () => {
       dropdown.style.opacity = '1';
       dropdown.style.transform = 'translateY(0) scale(1)';
     });
+    syncFloatingPanelsLayout();
     if (bellOutsideClickHandler) {
       document.removeEventListener('click', bellOutsideClickHandler, true);
       bellOutsideClickHandler = null;
@@ -1872,6 +2120,8 @@ document.addEventListener('DOMContentLoaded', () => {
   setupKeyboardForButtons();
   setUiTheme(getUiTheme());
   sanitizeActivityCacheForCurrentUser();
+  restoreMinimizedFormsFromCache();
+  window.addEventListener('resize', syncFloatingPanelsLayout);
   renderAuthState();
   authOpenBtn?.addEventListener('click', openAuthModal);
   authLogoutBtn?.addEventListener('click', logoutFlow);
@@ -2181,7 +2431,10 @@ document.addEventListener('DOMContentLoaded', () => {
         <div class="form-modal" role="dialog" aria-modal="true" aria-labelledby="form-title" style="padding:16px; max-height:90vh; overflow:auto;">
           <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;">
             <div id="form-title" style="font-weight:700;color:#f8fafc;">Formulario</div>
-            <button id="form-close" class="btn btn-neutral" style="font-size:14px;padding:4px 8px;">×</button>
+            <div style="display:flex; align-items:center; gap:6px;">
+              <button id="form-minimize" class="btn btn-neutral" type="button" title="Minimizar" style="font-size:12px;padding:4px 9px;border-radius:999px;background:linear-gradient(135deg,#0ea5e9,#1d4ed8);border:1px solid rgba(125,211,252,.5);">🗕</button>
+              <button id="form-close" class="btn btn-neutral" title="Cerrar" style="font-size:12px;padding:4px 9px;border-radius:999px;background:linear-gradient(135deg,#7f1d1d,#b91c1c);border:1px solid rgba(248,113,113,.5);">✕</button>
+            </div>
           </div>
           <div id="form-body" style="color:#cbd5e1;"></div>
           <div style="display:flex;justify-content:flex-end;gap:8px;margin-top:12px;">
@@ -2202,9 +2455,233 @@ document.addEventListener('DOMContentLoaded', () => {
     }
     return overlay;
   }
-  function showFormModal({ title, fields, onSubmit }) {
+  function ensureMinimizedFormsHost(){
+    let host = document.getElementById('form-minimized-host');
+    if (!host) {
+      host = document.createElement('div');
+      host.id = 'form-minimized-host';
+      host.style.position = 'fixed';
+      host.style.right = '16px';
+      host.style.left = 'auto';
+      host.style.bottom = '16px';
+      host.style.zIndex = '10020';
+      host.style.display = 'flex';
+      host.style.flexDirection = 'column';
+      host.style.gap = '8px';
+      document.body.appendChild(host);
+    }
+    if (!host.dataset.dragBound) {
+      host.dataset.dragBound = '1';
+      host.addEventListener('mousedown', (e) => {
+        const target = e.target instanceof Element ? e.target : null;
+        if (!target) return;
+        if (!target.closest('.minimized-chip-drag')) return;
+        if (target.closest('button')) return;
+        e.preventDefault();
+        const rect = host.getBoundingClientRect();
+        const startX = e.clientX;
+        const startY = e.clientY;
+        const startLeft = rect.left;
+        const startTop = rect.top;
+        const onMove = (ev) => {
+          const dx = ev.clientX - startX;
+          const dy = ev.clientY - startY;
+          const nextLeft = Math.max(8, Math.min(window.innerWidth - rect.width - 8, startLeft + dx));
+          const nextTop = Math.max(8, Math.min(window.innerHeight - rect.height - 8, startTop + dy));
+          host.style.left = `${nextLeft}px`;
+          host.style.top = `${nextTop}px`;
+          host.style.right = 'auto';
+          host.style.bottom = 'auto';
+          minimizedHostPos = { left: nextLeft, top: nextTop };
+        };
+        const onUp = () => {
+          document.removeEventListener('mousemove', onMove, true);
+          document.removeEventListener('mouseup', onUp, true);
+          try { localStorage.setItem(MINIMIZED_HOST_POS_KEY, JSON.stringify(minimizedHostPos || {})); } catch {}
+        };
+        document.addEventListener('mousemove', onMove, true);
+        document.addEventListener('mouseup', onUp, true);
+      });
+    }
+    if (!minimizedHostPos) {
+      try {
+        const raw = localStorage.getItem(MINIMIZED_HOST_POS_KEY);
+        const parsed = raw ? JSON.parse(raw) : null;
+        if (parsed && Number.isFinite(parsed.left) && Number.isFinite(parsed.top)) minimizedHostPos = { left: Number(parsed.left), top: Number(parsed.top) };
+      } catch {}
+    }
+    if (minimizedHostPos && Number.isFinite(minimizedHostPos.left) && Number.isFinite(minimizedHostPos.top)) {
+      host.style.left = `${Math.max(8, minimizedHostPos.left)}px`;
+      host.style.top = `${Math.max(8, minimizedHostPos.top)}px`;
+      host.style.right = 'auto';
+      host.style.bottom = 'auto';
+    }
+    return host;
+  }
+  function syncFloatingPanelsLayout(){
+    const host = document.getElementById('form-minimized-host');
+    if (!host) return;
+    const getVisibleRect = (el) => {
+      if (!el) return null;
+      const st = window.getComputedStyle(el);
+      if (st.display === 'none' || st.visibility === 'hidden' || Number(st.opacity || '1') <= 0.01) return null;
+      const r = el.getBoundingClientRect();
+      if (!r.width || !r.height) return null;
+      return r;
+    };
+    const overlapRect = (a, b, gap = 10) => {
+      if (!a || !b) return false;
+      return !(a.right + gap < b.left || a.left - gap > b.right || a.bottom + gap < b.top || a.top - gap > b.bottom);
+    };
+    const bell = document.getElementById('activity-bell-dropdown');
+    const bellOpen = !!bell && bell.style.display === 'block';
+    let bottomOffset = 16;
+    const toastHost = document.getElementById('toast-host');
+    const toastHeight = toastHost && toastHost.childElementCount > 0 ? toastHost.offsetHeight : 0;
+    const floatingAlerts = [...document.querySelectorAll('.floating-bottom-alert')];
+    const floatingHeight = floatingAlerts.reduce((max, el) => Math.max(max, el?.offsetHeight || 0), 0);
+    const extra = Math.max(toastHeight, floatingHeight);
+    if (extra > 0) bottomOffset += extra + 12;
+    if (minimizedHostPos && Number.isFinite(minimizedHostPos.left) && Number.isFinite(minimizedHostPos.top)) {
+      const rect = host.getBoundingClientRect();
+      let left = Math.max(8, Math.min(window.innerWidth - rect.width - 8, minimizedHostPos.left));
+      let top = Math.max(8, Math.min(window.innerHeight - rect.height - 8, minimizedHostPos.top));
+      const bottomUnsafe = window.innerHeight - bottomOffset;
+      if (top + rect.height > bottomUnsafe) top = Math.max(8, bottomUnsafe - rect.height - 8);
+      host.style.left = `${left}px`;
+      host.style.top = `${top}px`;
+      host.style.right = 'auto';
+      host.style.bottom = 'auto';
+      let hostRect = host.getBoundingClientRect();
+      const avoid = [
+        getVisibleRect(document.getElementById('activity-bell-dropdown')),
+        getVisibleRect(document.getElementById('app-menu-dropdown')),
+      ].filter(Boolean);
+      for (let i = 0; i < 8; i++) {
+        const hit = avoid.find((r) => overlapRect(hostRect, r));
+        if (!hit) break;
+        const canMoveLeft = hit.left - hostRect.width - 14 >= 8;
+        const canMoveBelow = hit.bottom + 14 + hostRect.height <= window.innerHeight - 8;
+        if (canMoveLeft) left = hit.left - hostRect.width - 14;
+        else if (canMoveBelow) top = hit.bottom + 14;
+        else top = Math.max(8, hit.top - hostRect.height - 14);
+        left = Math.max(8, Math.min(window.innerWidth - hostRect.width - 8, left));
+        top = Math.max(8, Math.min(window.innerHeight - hostRect.height - 8, top));
+        host.style.left = `${left}px`;
+        host.style.top = `${top}px`;
+        hostRect = host.getBoundingClientRect();
+      }
+      minimizedHostPos = { left, top };
+      try { localStorage.setItem(MINIMIZED_HOST_POS_KEY, JSON.stringify(minimizedHostPos || {})); } catch {}
+    } else {
+      host.style.bottom = `${bottomOffset}px`;
+      if (bellOpen) {
+        host.style.left = '16px';
+        host.style.right = 'auto';
+      } else {
+        host.style.left = 'auto';
+        host.style.right = '16px';
+      }
+      host.style.top = 'auto';
+      const menuRect = getVisibleRect(document.getElementById('app-menu-dropdown'));
+      const bellRect = getVisibleRect(document.getElementById('activity-bell-dropdown'));
+      const hostRect = host.getBoundingClientRect();
+      if (overlapRect(hostRect, menuRect) || overlapRect(hostRect, bellRect)) {
+        host.style.left = '16px';
+        host.style.right = 'auto';
+      }
+    }
+  }
+  function persistMinimizedForms(){
+    try {
+      const safe = (minimizedForms || []).map((x) => ({
+        id: Number(x.id || 0),
+        title: String(x.title || 'Formulario'),
+        displayTitle: String(x.displayTitle || x.title || 'Formulario'),
+        identity: String(x.identity || ''),
+        fields: Array.isArray(x.fields) ? x.fields : [],
+        values: x.values && typeof x.values === 'object' ? x.values : {},
+        hasOnSubmit: typeof x.onSubmit === 'function',
+      })).slice(0, 10);
+      localStorage.setItem(MINIMIZED_FORMS_KEY, JSON.stringify(safe));
+    } catch {}
+  }
+  function restoreMinimizedFormsFromCache(){
+    try {
+      const raw = localStorage.getItem(MINIMIZED_FORMS_KEY);
+      if (!raw) return;
+      const arr = JSON.parse(raw);
+      if (!Array.isArray(arr)) return;
+      minimizedForms = arr.map((x) => ({
+        id: Number(x?.id || 0) || (minimizedFormSeq++),
+        title: String(x?.title || 'Formulario'),
+        displayTitle: String(x?.displayTitle || x?.title || 'Formulario'),
+        identity: String(x?.identity || ''),
+        fields: Array.isArray(x?.fields) ? x.fields : [],
+        values: x?.values && typeof x.values === 'object' ? x.values : {},
+        onSubmit: null,
+      })).filter((x) => x.id > 0);
+      const maxId = minimizedForms.reduce((m, x) => Math.max(m, Number(x.id) || 0), 0);
+      minimizedFormSeq = Math.max(minimizedFormSeq, maxId + 1);
+      renderMinimizedForms();
+    } catch {}
+  }
+  function renderMinimizedForms() {
+    const host = ensureMinimizedFormsHost();
+    host.innerHTML = '';
+    minimizedForms.forEach((entry) => {
+      const chip = document.createElement('div');
+      chip.setAttribute('data-minimized-id', String(entry.id));
+      chip.style.display = 'flex';
+      chip.style.alignItems = 'center';
+      chip.style.gap = '8px';
+      chip.style.padding = '8px 10px';
+      chip.style.borderRadius = '10px';
+      chip.style.border = '1px solid rgba(125,211,252,.45)';
+      chip.style.background = 'linear-gradient(180deg, rgba(7,26,52,.98), rgba(8,33,74,.96))';
+      chip.style.boxShadow = '0 12px 26px rgba(2,132,199,.30)';
+      chip.style.cursor = 'grab';
+      chip.innerHTML = `
+        <span class="minimized-chip-drag" style="color:#dbeafe; font-weight:700; font-size:12px; flex:1; user-select:none;">🗂 ${escapeHtml(entry.displayTitle || entry.title || 'Formulario')}</span>
+        <button type="button" class="btn btn-primary" data-open-id="${entry.id}" style="padding:4px 8px; font-size:11px;">Abrir</button>
+        <button type="button" class="btn btn-danger" data-close-id="${entry.id}" style="padding:4px 8px; font-size:11px;">Cerrar</button>
+      `;
+      chip.querySelector('[data-open-id]')?.addEventListener('click', (e) => {
+        e.preventDefault();
+        try { formOpenFromRect = chip.getBoundingClientRect(); } catch { formOpenFromRect = null; }
+        const idx = minimizedForms.findIndex((x) => Number(x.id) === Number(entry.id));
+        if (idx === -1) return;
+        const current = minimizedForms[idx];
+        minimizedForms.splice(idx, 1);
+        renderMinimizedForms();
+        const mappedFields = (current.fields || []).map((f) => ({
+          ...f,
+          value: Object.prototype.hasOwnProperty.call(current.values || {}, String(f.id || ''))
+            ? current.values[String(f.id || '')]
+            : f.value,
+        }));
+        const resumeSubmit = typeof current.onSubmit === 'function'
+          ? current.onSubmit
+          : async () => {
+              await showMessageModal('Este formulario fue restaurado tras recargar/cerrar sesión. Vuelve a abrir la edición original para guardar cambios.', { title: 'Formulario restaurado' });
+            };
+        showFormModal({ title: current.title, fields: mappedFields, onSubmit: resumeSubmit, resumeMinimizedId: current.id, resumeIdentity: current.identity || '' });
+      });
+      chip.querySelector('[data-close-id]')?.addEventListener('click', (e) => {
+        e.preventDefault();
+        minimizedForms = minimizedForms.filter((x) => Number(x.id) !== Number(entry.id));
+        persistMinimizedForms();
+        renderMinimizedForms();
+      });
+      host.appendChild(chip);
+    });
+    syncFloatingPanelsLayout();
+    persistMinimizedForms();
+  }
+  function showFormModal({ title, fields, onSubmit, resumeMinimizedId = null, resumeIdentity = '' }) {
     const overlay = ensureFormModal(); const titleEl = overlay.querySelector('#form-title'); const bodyEl = overlay.querySelector('#form-body');
-    const btnCancel = overlay.querySelector('#form-cancel'); const btnSubmit = overlay.querySelector('#form-submit'); const btnClose = overlay.querySelector('#form-close');
+    const btnCancel = overlay.querySelector('#form-cancel'); const btnSubmit = overlay.querySelector('#form-submit'); const btnClose = overlay.querySelector('#form-close'); const btnMinimize = overlay.querySelector('#form-minimize');
+    overlay.style.display = 'flex';
     if (titleEl) titleEl.textContent = title || 'Formulario';
     if (bodyEl) {
       bodyEl.innerHTML = '';
@@ -2279,12 +2756,13 @@ document.addEventListener('DOMContentLoaded', () => {
             wrapper.style.border = '1px solid rgba(125,211,252,.38)';
             wrapper.style.borderRadius = '10px';
             wrapper.style.padding = '8px';
-            wrapper.style.background = 'rgba(2,6,23,.28)';
+            wrapper.style.background = 'transparent';
             const summary = document.createElement('summary');
             summary.style.cursor = 'pointer';
             summary.style.listStyle = 'none';
             summary.style.display = 'flex';
             summary.style.alignItems = 'center';
+            summary.style.justifyContent = 'space-between';
             summary.style.gap = '8px';
             summary.style.color = '#e2e8f0';
             summary.style.fontWeight = '700';
@@ -2292,10 +2770,15 @@ document.addEventListener('DOMContentLoaded', () => {
             selectedInfo.style.display = 'inline-flex';
             selectedInfo.style.alignItems = 'center';
             selectedInfo.style.gap = '8px';
+            const chevron = document.createElement('span');
+            chevron.textContent = '▾';
+            chevron.style.color = '#93c5fd';
+            chevron.style.fontSize = '12px';
             const list = document.createElement('div');
             list.style.display = 'grid';
             list.style.gap = '6px';
             list.style.marginTop = '8px';
+            list.style.background = 'transparent';
             const paintSelected = () => {
               const cur = (f.options || []).find((x) => String(x.value) === String(hidden.value)) || f.options[0];
               const icon = BANK_ICON?.[String(cur?.value || '')] || '';
@@ -2304,13 +2787,22 @@ document.addEventListener('DOMContentLoaded', () => {
             (f.options || []).forEach((opt) => {
               const btnOpt = document.createElement('button');
               btnOpt.type = 'button';
-              btnOpt.className = 'btn btn-neutral';
+              btnOpt.className = 'bank-option-btn';
               btnOpt.style.justifyContent = 'flex-start';
               btnOpt.style.textAlign = 'left';
               btnOpt.style.padding = '6px 8px';
               btnOpt.style.display = 'inline-flex';
               btnOpt.style.alignItems = 'center';
               btnOpt.style.gap = '8px';
+              btnOpt.style.background = 'rgba(15,23,42,.28)';
+              btnOpt.style.border = '1px solid rgba(125,211,252,.35)';
+              btnOpt.style.color = '#e2e8f0';
+              btnOpt.style.borderRadius = '10px';
+              btnOpt.style.boxShadow = 'none';
+              btnOpt.style.backdropFilter = 'blur(2px)';
+              btnOpt.style.cursor = 'pointer';
+              btnOpt.onmouseenter = () => { btnOpt.style.background = 'rgba(14,116,144,.26)'; };
+              btnOpt.onmouseleave = () => { btnOpt.style.background = 'rgba(15,23,42,.28)'; };
               const icon = BANK_ICON?.[String(opt.value || '')] || '';
               btnOpt.innerHTML = `${icon ? `<img src="${escapeHtml(icon)}" alt="" style="width:18px; height:18px; object-fit:contain; border-radius:4px; border:1px solid rgba(125,211,252,.35);" />` : ''}<span>${escapeHtml(opt.label || opt.value)}</span>`;
               btnOpt.addEventListener('click', () => {
@@ -2321,6 +2813,7 @@ document.addEventListener('DOMContentLoaded', () => {
               list.appendChild(btnOpt);
             });
             summary.appendChild(selectedInfo);
+            summary.appendChild(chevron);
             wrapper.appendChild(summary);
             wrapper.appendChild(list);
             paintSelected();
@@ -2380,7 +2873,70 @@ document.addEventListener('DOMContentLoaded', () => {
     };
     const initialSnapshot = JSON.stringify(collectValues());
     const isDirty = () => JSON.stringify(collectValues()) !== initialSnapshot;
-    function cleanup(){ closeAllEmojiPanels(); overlay.style.opacity='0'; overlay.style.visibility='hidden'; btnCancel.removeEventListener('click', onCancel); btnSubmit.removeEventListener('click', onSubmitClick); btnClose.removeEventListener('click', onCancel); overlay.removeEventListener('click', onOverlayClick); document.removeEventListener('keydown', onKey); document.removeEventListener('mousedown', onGlobalMouseDown, true); }
+    const deriveMinimizedDisplayTitle = (baseTitle, values) => {
+      const v = values || {};
+      const name = String(v.title || v.email || v.username || v.bank || '').trim();
+      if (!name) return String(baseTitle || 'Formulario');
+      return `${String(baseTitle || 'Formulario')} · ${name}`;
+    };
+    const deriveMinimizedIdentity = (baseTitle, fieldsDef, values) => {
+      const ids = (Array.isArray(fieldsDef) ? fieldsDef : []).map((f) => String(f?.id || '')).join(',');
+      const v = values || {};
+      const main = String(v.id || v.title || v.email || v.username || v.bank || '').trim().toLowerCase();
+      return `${String(baseTitle || '').trim().toLowerCase()}|${ids}|${main}`;
+    };
+    function minimizeForm(e){
+      e?.preventDefault?.();
+      const values = collectValues();
+      const identity = resumeIdentity || deriveMinimizedIdentity(title || 'Formulario', fields || [], values);
+      const reuseId = Number(resumeMinimizedId || 0) || 0;
+      if (reuseId > 0) {
+        minimizedForms = minimizedForms.filter((x) => Number(x.id) !== reuseId);
+      } else if (identity) {
+        minimizedForms = minimizedForms.filter((x) => String(x.identity || '') !== identity);
+      }
+      const minimizedId = reuseId > 0 ? reuseId : minimizedFormSeq++;
+      minimizedForms.push({
+        id: minimizedId,
+        title: title || 'Formulario',
+        displayTitle: deriveMinimizedDisplayTitle(title || 'Formulario', values),
+        identity,
+        fields: (fields || []).map((f) => ({ ...f })),
+        values,
+        onSubmit,
+      });
+      renderMinimizedForms();
+      const finishMinimize = () => {
+        overlay.style.display='none';
+        overlay.style.opacity='0';
+        overlay.style.visibility='hidden';
+        const panel = overlay.firstElementChild;
+        if (panel) {
+          panel.style.transform = '';
+          panel.style.opacity = '';
+          panel.style.transformOrigin = '';
+        }
+        btnCancel.removeEventListener('click', onCancel);
+        btnSubmit.removeEventListener('click', onSubmitClick);
+        btnClose.removeEventListener('click', onCancel);
+        btnMinimize?.removeEventListener('click', minimizeForm);
+        overlay.removeEventListener('click', onOverlayClick);
+        document.removeEventListener('keydown', onKey);
+        document.removeEventListener('mousedown', onGlobalMouseDown, true);
+      };
+      const panel = overlay.firstElementChild;
+      const targetChip = document.querySelector(`#form-minimized-host [data-minimized-id="${minimizedId}"]`);
+      if (!panel || !targetChip) {
+        finishMinimize();
+        return;
+      }
+      const from = panel.getBoundingClientRect();
+      const to = targetChip.getBoundingClientRect();
+      const dx = (to.left + to.width / 2) - (from.left + from.width / 2);
+      const dy = (to.top + to.height / 2) - (from.top + from.height / 2);
+      runFormMinimizeAnimation(panel, targetChip, dx, dy, getFormAnimPreset(), finishMinimize);
+    }
+    function cleanup(){ closeAllEmojiPanels(); overlay.style.display='none'; overlay.style.opacity='0'; overlay.style.visibility='hidden'; btnCancel.removeEventListener('click', onCancel); btnSubmit.removeEventListener('click', onSubmitClick); btnClose.removeEventListener('click', onCancel); btnMinimize?.removeEventListener('click', minimizeForm); overlay.removeEventListener('click', onOverlayClick); document.removeEventListener('keydown', onKey); document.removeEventListener('mousedown', onGlobalMouseDown, true); }
     function onCancel(e){ e.preventDefault(); cleanup(); }
     async function onOverlayClick(e){
       if (e.target !== overlay) return;
@@ -2409,9 +2965,19 @@ document.addEventListener('DOMContentLoaded', () => {
       if (insideInput) { closeAllEmojiPanels(); return; }
       closeAllEmojiPanels();
     }
-    btnCancel.addEventListener('click', onCancel); btnSubmit.addEventListener('click', onSubmitClick); btnClose.addEventListener('click', onCancel); overlay.addEventListener('click', onOverlayClick); document.addEventListener('keydown', onKey);
+    btnCancel.addEventListener('click', onCancel); btnSubmit.addEventListener('click', onSubmitClick); btnClose.addEventListener('click', onCancel); btnMinimize?.addEventListener('click', minimizeForm); overlay.addEventListener('click', onOverlayClick); document.addEventListener('keydown', onKey);
     document.addEventListener('mousedown', onGlobalMouseDown, true);
-    overlay.style.visibility='visible'; overlay.style.opacity='1'; setTimeout(()=>{ try { btnSubmit.focus(); } catch {} },0);
+    overlay.style.display='flex'; overlay.style.visibility='visible'; overlay.style.opacity='1';
+    const panel = overlay.firstElementChild;
+    if (panel && formOpenFromRect) {
+      runFormOpenAnimation(panel, formOpenFromRect, getFormAnimPreset());
+      formOpenFromRect = null;
+    } else if (panel) {
+      panel.style.transform = '';
+      panel.style.opacity = '';
+      formOpenFromRect = null;
+    }
+    setTimeout(()=>{ try { btnSubmit.focus(); } catch {} },0);
   }
 
   function wireStaticFlatpickrInputs() {
@@ -2477,10 +3043,10 @@ document.addEventListener('DOMContentLoaded', () => {
       }
       // Botones
       const btnUpdate=document.createElement('button'); btnUpdate.textContent='Actualizar'; applyBtn(btnUpdate, 'primary');
-      const btnDelete=document.createElement('button'); btnDelete.textContent='Eliminar'; btnDelete.className='btn btn-danger';
+      const btnDelete=document.createElement('button'); btnDelete.textContent='🗑️ Eliminar'; btnDelete.className='btn btn-danger';
       btnUpdate.addEventListener('click',()=>openEditModal(e));
       if (!blockAdminAction(btnDelete, 'Eliminar errores requiere rol ADMIN')) {
-        btnDelete.addEventListener('click', async ()=>{ const confirmed = await showConfirm('¿Eliminar este error?'); if (!confirmed) return; try { const res = await fetch('/errors/'+e.id,{method:'DELETE', headers:{'x-entity-name': toHeaderSafe(e?.title)}}); if (!res.ok) throw new Error(await res.text()||'Error eliminando'); await refreshErrorsEverywhere(); } catch (err) { console.error(err); await showMessageModal('No se pudo eliminar el error', { title: 'Error' }); } });
+        btnDelete.addEventListener('click', async ()=>{ const confirmed = await showConfirm(`¿Seguro que deseas eliminar el error "${String(e?.title || '').trim() || '#'+e.id}"?`, { title:'Confirmar eliminación', confirmText:'Eliminar', cancelText:'Cancelar' }); if (!confirmed) return; try { const res = await fetch('/errors/'+e.id,{method:'DELETE', headers:{'x-entity-name': toHeaderSafe(e?.title)}}); if (!res.ok) throw new Error(await res.text()||'Error eliminando'); await refreshErrorsEverywhere(); } catch (err) { console.error(err); await showMessageModal('No se pudo eliminar el error', { title: 'Error' }); } });
       }
       li.appendChild(viewDiv); li.appendChild(btnUpdate); if (btnToggle) li.appendChild(btnToggle); li.appendChild(btnDelete); if (thumbs) li.appendChild(thumbs);
       targetEl.appendChild(li);
@@ -2581,37 +3147,24 @@ document.addEventListener('DOMContentLoaded', () => {
   tabButtons.forEach(btn=>{ btn.addEventListener('click',()=>{ const tab=btn.getAttribute('data-tab'); if (!tab) return; showTab(tab); if (tab==='errors') fetchErrors(); if (tab==='tasks') { if (typeof fetchTasks === 'function') fetchTasks(); } if (tab==='payments') { setPaymentsSubtab('list'); if (typeof fetchPayments === 'function') fetchPayments(); } if (tab==='notes') { if (typeof window.fetchNotes === 'function') window.fetchNotes(); } if (tab==='profiles') { if (typeof fetchUsers === 'function') fetchUsers(); } if (tab==='activity') fetchActivityLogs(false); }); });
   function setupToggleList(buttonId, listSelector){ const btn=document.getElementById(buttonId); const list=document.querySelector(listSelector); if (!btn || !list) return; btn.addEventListener('click',()=>{ const collapsed=list.classList.toggle('collapsed'); btn.textContent = collapsed ? 'Expandir' : 'Contraer'; }); }
 
-  // Persistencia de Modo P en localStorage por sección
-  function getCensorKey(id){ return 'censor:' + id; }
-  function applyCensorState(btnId, sectionId){
-    const btn = document.getElementById(btnId);
-    const section = document.getElementById(sectionId);
-    if (!section) return;
-    const stored = localStorage.getItem(getCensorKey(sectionId));
-    const isOn = stored === null ? true : stored === 'on';
-    section.classList.toggle('censored', isOn);
-    if (btn) { btn.textContent = 'Modo P: ' + (isOn ? 'ON' : 'OFF'); btn.title = isOn ? 'Mostrar contenido' : 'Ocultar contenido'; }
+  // Modo P global
+  function getGlobalCensorOn(){
+    try {
+      const raw = localStorage.getItem(GLOBAL_CENSOR_KEY);
+      return raw == null ? false : raw === '1';
+    } catch { return false; }
   }
-  function setupPersistentCensorToggle(btnId, sectionId){
-    const btn = document.getElementById(btnId);
-    const section = document.getElementById(sectionId);
-    if (!btn || !section) return;
-    btn.addEventListener('click', ()=>{
-      const isOn = section.classList.toggle('censored');
-      btn.textContent = 'Modo P: ' + (isOn ? 'ON' : 'OFF');
-      btn.title = isOn ? 'Mostrar contenido' : 'Ocultar contenido';
-      localStorage.setItem(getCensorKey(sectionId), isOn ? 'on' : 'off');
-    });
+  function setGlobalCensorOn(on){
+    const isOn = !!on;
+    document.body.classList.toggle('global-censored', isOn);
+    if (globalCensorBtn) {
+      globalCensorBtn.textContent = isOn ? '🙈' : '👁️';
+      globalCensorBtn.title = isOn ? 'Modo P global: ON' : 'Modo P global: OFF';
+    }
+    try { localStorage.setItem(GLOBAL_CENSOR_KEY, isOn ? '1' : '0'); } catch {}
   }
-  // Initialize censor state and toggles
-  applyCensorState('errors-censor-toggle', 'errors-section');
-  applyCensorState('tasks-censor-toggle', 'tasks-section');
-  applyCensorState('payments-censor-toggle', 'payments-section');
-  applyCensorState('notes-censor-toggle', 'notes-section');
-  setupPersistentCensorToggle('errors-censor-toggle', 'errors-section');
-  setupPersistentCensorToggle('tasks-censor-toggle', 'tasks-section');
-  setupPersistentCensorToggle('payments-censor-toggle', 'payments-section');
-  setupPersistentCensorToggle('notes-censor-toggle', 'notes-section');
+  setGlobalCensorOn(getGlobalCensorOn());
+  globalCensorBtn?.addEventListener('click', () => setGlobalCensorOn(!getGlobalCensorOn()));
 
   function applyTaskFilters() {
     const q = (tasksSearchAnyInput?.value || '').trim().toLowerCase();
@@ -2869,6 +3422,7 @@ document.addEventListener('DOMContentLoaded', () => {
     clearTimeout(rec.timeoutId);
     if (rec.intervalId) clearInterval(rec.intervalId);
     try { rec.toastEl?.remove(); } catch {}
+    syncFloatingPanelsLayout();
     const exists = (allTasks || []).some(t => Number(t.id) === Number(taskId));
     if (!exists) {
       const idx = Math.max(0, Math.min(rec.index ?? 0, allTasks.length));
@@ -2892,6 +3446,7 @@ document.addEventListener('DOMContentLoaded', () => {
     if (isCalendarOpen()) renderCalendar();
 
     const toast = document.createElement('div');
+    toast.className = 'floating-bottom-alert';
     toast.style.position = 'fixed';
     toast.style.left = '16px';
     toast.style.bottom = '16px';
@@ -2917,6 +3472,7 @@ document.addEventListener('DOMContentLoaded', () => {
     toast.appendChild(txt);
     toast.appendChild(undoBtn);
     document.body.appendChild(toast);
+    syncFloatingPanelsLayout();
 
     const intervalId = setInterval(() => {
       remaining -= 1;
@@ -2927,6 +3483,7 @@ document.addEventListener('DOMContentLoaded', () => {
       pendingTaskDeletes.delete(id);
       clearInterval(intervalId);
       try { toast.remove(); } catch {}
+      syncFloatingPanelsLayout();
       try {
         const res = await fetch('/tasks/' + task.id, { method: 'DELETE', headers: { 'x-entity-name': toHeaderSafe(task?.title) } });
         if (!res.ok) throw new Error(await res.text());
@@ -2992,6 +3549,29 @@ document.addEventListener('DOMContentLoaded', () => {
     tasksStartAlertEl.style.display = 'block';
     tasksStartAlertEl.innerHTML = `La tarea <span class="censor-title">${escapeHtml(next.title || 'sin título')}</span> va a iniciar (${escapeHtml(dayTxt)}). Cronómetro a iniciar: <span class="censor-message live-start-countdown" data-start-at="${escapeHtml(next.startAt)}">${fmtCountdown(msLeft)}</span>`;
   }
+  function showTaskCompletionAlert(taskTitle) {
+    const safeTitle = String(taskTitle || 'sin título').trim() || 'sin título';
+    showToast(`Tarea completada: ${safeTitle}`, 'success', 4200);
+    if (!tasksStartAlertEl) return;
+    const prevHtml = tasksStartAlertEl.innerHTML;
+    const prevDisplay = tasksStartAlertEl.style.display;
+    tasksStartAlertEl.style.display = 'block';
+    tasksStartAlertEl.style.background = 'linear-gradient(90deg, rgba(6,78,59,.94), rgba(16,185,129,.86))';
+    tasksStartAlertEl.style.border = '1px solid rgba(110,231,183,.65)';
+    tasksStartAlertEl.style.color = '#ecfdf5';
+    tasksStartAlertEl.innerHTML = `✅ La tarea <span class="censor-title">${escapeHtml(safeTitle)}</span> se completó correctamente`;
+    setTimeout(() => {
+      tasksStartAlertEl.style.background = '';
+      tasksStartAlertEl.style.border = '';
+      tasksStartAlertEl.style.color = '';
+      if (prevHtml && prevDisplay !== 'none') {
+        tasksStartAlertEl.innerHTML = prevHtml;
+        tasksStartAlertEl.style.display = prevDisplay || 'block';
+      } else {
+        renderTasksStartAlert(filteredTasks);
+      }
+    }, 4800);
+  }
   function checkTaskTimeNotifications(tasks){
     if (!isAdminUser()) return;
     const arr = Array.isArray(tasks) ? tasks : [];
@@ -3047,7 +3627,11 @@ document.addEventListener('DOMContentLoaded', () => {
         queueClientNotification(`Se movió la tarea "${ref}" a ${formatDateTime(n.startAt)}`, 'tasks', `task-move-${id}-${n.startAt}`, { action: 'PATCH', entityId: id });
       }
       if ((p.status || '') !== (n.status || '')) {
-        queueClientNotification(`La tarea "${ref}" cambió de estado a ${String(n.status || '').replaceAll('_', ' ')}`, 'tasks', `task-status-${id}-${n.status}-${n.startAt}`, { action: 'PATCH', entityId: id });
+        const prettyStatus = String(n.status || '').replaceAll('_', ' ');
+        const msg = n.status === 'COMPLETED'
+          ? `Se completó la tarea "${ref}"`
+          : `La tarea "${ref}" cambió de estado a ${prettyStatus}`;
+        queueClientNotification(msg, 'tasks', `task-status-${id}-${n.status}-${n.startAt}`, { action: 'PATCH', entityId: id });
       }
       if (Number(p.durationMinutes || 0) !== Number(n.durationMinutes || 0)) {
         queueClientNotification(`Se actualizó la duración de "${ref}" a ${n.durationMinutes} min`, 'tasks', `task-duration-${id}-${n.durationMinutes}-${n.startAt}`, { action: 'PATCH', entityId: id });
@@ -3367,7 +3951,7 @@ document.addEventListener('DOMContentLoaded', () => {
       const btnPause = mkBtn('Pausar', '#6b7280', 'neutral');
       const btnComplete = mkBtn('Completar', '#10b981', 'success');
       const btnReplicate = mkBtn('+R', '#6366f1', 'primary');
-      const btnDelete = mkBtn('Eliminar', '#ef4444', 'danger');
+      const btnDelete = mkBtn('🗑️ Eliminar', '#ef4444', 'danger');
       const btnPin = mkBtn('', '#0e7490', 'neutral');
       btnPin.innerHTML = getPinIconMarkup(isPinnedTask(t.id));
       btnPin.title = isPinnedTask(t.id) ? 'Desfijar tarea' : 'Fijar tarea';
@@ -3762,9 +4346,13 @@ document.addEventListener('DOMContentLoaded', () => {
 
   async function updateTaskStatus(id, action){
     try {
+      const taskRef = (allTasks || []).find((t) => Number(t?.id) === Number(id));
       const res = await fetch(`/tasks/${id}/${action}`, { method: 'PATCH' });
       if (!res.ok) throw new Error(await res.text());
       showToast('Estado de tarea actualizado', 'success');
+      if (action === 'complete') {
+        showTaskCompletionAlert(taskRef?.title || `#${id}`);
+      }
       if (action === 'pause') {
         const rec = taskTimers.get(String(id));
         if (rec) {
@@ -4005,7 +4593,7 @@ document.addEventListener('DOMContentLoaded', () => {
         const actions = document.createElement('div'); actions.style.marginTop='8px'; actions.style.display='flex'; actions.style.gap='8px';
         const btn = document.createElement('button'); btn.textContent = '✏️ Editar';
         btn.style.background = '#3b82f6'; btn.style.color = '#fff'; btn.style.border = 'none'; btn.style.borderRadius = '6px'; btn.style.padding = '6px 10px'; btn.style.cursor = 'pointer';
-        const btnDelete = document.createElement('button'); btnDelete.textContent = 'Eliminar';
+        const btnDelete = document.createElement('button'); btnDelete.textContent = '🗑️ Eliminar';
         btnDelete.style.background = '#ef4444'; btnDelete.style.color = '#fff'; btnDelete.style.border = 'none'; btnDelete.style.borderRadius = '6px'; btnDelete.style.padding = '6px 10px'; btnDelete.style.cursor = 'pointer';
         const isPast = t.startAt ? (new Date(t.startAt).setHours(0,0,0,0) < todayMid.getTime()) : false;
         if (isPast) { btn.disabled = true; btn.style.opacity = '0.5'; btn.title = 'No editable (tarea del pasado)'; }
@@ -4732,7 +5320,7 @@ document.addEventListener('DOMContentLoaded', () => {
       actions.style.display='flex'; actions.style.gap='8px'; actions.style.marginTop='10px';
       const mkBtn = (label, bg, variant='neutral') => { const b=document.createElement('button'); b.textContent=label; applyBtn(b, variant); b.style.background=bg; return b; };
       const btnEdit = mkBtn('✏️ Editar', '#3b82f6', 'primary');
-      const btnDelete = mkBtn('Eliminar', '#ef4444', 'danger');
+      const btnDelete = mkBtn('🗑️ Eliminar', '#ef4444', 'danger');
 
       btnEdit.addEventListener('click', () => {
         showFormModal({
@@ -5312,7 +5900,7 @@ document.addEventListener('DOMContentLoaded', () => {
       });
       const btnDelete = document.createElement('button');
       btnDelete.className = 'btn btn-danger';
-      btnDelete.textContent = 'Eliminar';
+      btnDelete.textContent = '🗑️ Eliminar';
       btnDelete.addEventListener('click', async () => {
         const ok = await showConfirm(`¿Eliminar usuario ${u.email}?`, { title: 'Usuarios', confirmText: 'Eliminar', cancelText: 'Cancelar' });
         if (!ok) return;
@@ -5403,10 +5991,11 @@ document.addEventListener('DOMContentLoaded', () => {
       t.style.borderColor = kind==='success'? '#10b981' : kind==='danger'? '#ef4444' : '#1f2937';
       t.textContent = message;
       host.appendChild(t);
+      syncFloatingPanelsLayout();
       setTimeout(()=>{
         t.style.opacity = '0';
         t.style.transition = 'opacity 200ms ease';
-        setTimeout(()=>{ try { t.remove(); } catch {} }, 220);
+        setTimeout(()=>{ try { t.remove(); } catch {} syncFloatingPanelsLayout(); }, 220);
       }, timeout);
     } catch {}
   }
@@ -5493,7 +6082,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
       // Placeholder-based tokenizer to avoid re-processing inside injected HTML
       const placeholders = [];
-      const PH = (i) => `@@TOKEN${i}@@`;
+      const PH = (i) => `\uE000${i}\uE001`;
       function protect(re, className){
         code = code.replace(re, (m) => {
           const idx = placeholders.push(`<span class="${className}">${escapeHtml(m)}</span>`) - 1;
@@ -5528,7 +6117,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
       // Escape remaining text, then restore placeholders to HTML spans
       let safe = escapeHtml(code);
-      safe = safe.replace(/@@TOKEN(\d+)@@/g, (_, n) => placeholders[Number(n)] || '');
+      safe = safe.replace(/\uE000(\d+)\uE001/g, (_, n) => placeholders[Number(n)] || '');
 
       const style = `
         .tok-kw{ color:#93c5fd; }
@@ -5542,6 +6131,25 @@ document.addEventListener('DOMContentLoaded', () => {
       if (!document.getElementById('inline-code-theme')){ const styleEl = document.createElement('style'); styleEl.id = 'inline-code-theme'; styleEl.textContent = style; document.head.appendChild(styleEl); }
       return `<pre style="background:#0b1220; color:#e5e7eb; padding:12px; border:1px solid #334155; border-radius:8px; overflow:auto;"><code>${safe}</code></pre>`;
     }
+    function stripFence(raw){
+      const text = String(raw || '');
+      const m = text.match(/^```[a-zA-Z]*\n([\s\S]*?)\n```$/);
+      return m ? m[1] : text;
+    }
+    function buildLineNumbers(linesCount){
+      const total = Math.max(1, Number(linesCount || 1));
+      return Array.from({ length: total }, (_, i) => `<div>${i + 1}</div>`).join('');
+    }
+    function renderLineNumbered(contentHtml, rawText){
+      const linesCount = String(rawText || '').split('\n').length;
+      const numbers = buildLineNumbers(linesCount);
+      return `
+        <div style="display:grid; grid-template-columns:auto 1fr; gap:10px; margin-top:6px; align-items:start;">
+          <div style="user-select:none; color:#64748b; font-family:ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace; font-size:12px; line-height:1.45; text-align:right; padding:12px 8px; border:1px solid #334155; border-radius:8px; background:#030712;">${numbers}</div>
+          <div style="min-width:0;">${contentHtml}</div>
+        </div>
+      `;
+    }
 
     function renderNotes(items){
       if (!notesListEl2) return;
@@ -5551,12 +6159,22 @@ document.addEventListener('DOMContentLoaded', () => {
         const ts = n.createdAt ? new Date(n.createdAt).toLocaleString() : '';
         const hasFence = typeof n.content === 'string' && /^```/.test(n.content.trim());
         const langPref = (n.language || '').toLowerCase();
-        const contentHtml = hasFence ? highlightJs(n.content, langPref) : (langPref === 'javascript' || langPref === 'typescript') ? highlightJs(n.content, langPref) : `<div class="censor-message" style="color:#cbd5e1; margin-top:4px; white-space:pre-wrap;">${escapeHtml(n.content || '')}</div>`;
+        const isCode = hasFence || langPref === 'javascript' || langPref === 'typescript';
+        const plainHtml = `<pre class="censor-message" style="margin:0; white-space:pre-wrap; background:#0b1220; color:#cbd5e1; padding:12px; border:1px solid #334155; border-radius:8px; overflow:auto;">${escapeHtml(n.content || '')}</pre>`;
+        const baseContentHtml = isCode ? highlightJs(n.content, langPref) : plainHtml;
+        const contentHtml = baseContentHtml;
+        const langLabel = langPref === 'javascript' ? 'JavaScript' : langPref === 'typescript' ? 'TypeScript' : 'Texto plano';
+        const langBg = langPref === 'javascript'
+          ? 'linear-gradient(135deg,#854d0e,#ca8a04)'
+          : langPref === 'typescript'
+            ? 'linear-gradient(135deg,#1d4ed8,#2563eb)'
+            : 'linear-gradient(135deg,#334155,#475569)';
         return `<li class="card-item" data-entity="notes" data-id="${n.id}">`+
                `<div style="display:flex; align-items:center; justify-content:space-between; gap:8px;">`+
                `<strong class="censor-title">${escapeHtml(n.title || '')}</strong>`+
                `<small style="color:#94a3b8;">${ts}</small>`+
                `</div>`+
+               `<div style="margin-top:6px; display:inline-flex; align-items:center; gap:6px; padding:2px 8px; border-radius:999px; color:#f8fafc; font-size:11px; font-weight:800; background:${langBg}; border:1px solid rgba(148,163,184,.35);">${escapeHtml(langLabel)}</div>`+
                `${contentHtml}`+
                `<div class="censor-tags" style="color:#94a3b8; margin-top:6px;">Tags: ${escapeHtml(tags)}</div>`+
                `<div style="display:flex; gap:8px; margin-top:8px;">`+
